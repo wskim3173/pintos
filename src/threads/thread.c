@@ -28,6 +28,8 @@ static struct list ready_list;
    when they are first scheduled and removed when they exit. */
 static struct list all_list;
 
+static struct list sleep_list;
+
 /* Idle thread. */
 static struct thread *idle_thread;
 
@@ -49,6 +51,7 @@ struct kernel_thread_frame
 static long long idle_ticks;    /* # of timer ticks spent idle. */
 static long long kernel_ticks;  /* # of timer ticks in kernel threads. */
 static long long user_ticks;    /* # of timer ticks in user programs. */
+static int64_t min_ticks = INT64_MAX;
 
 /* Scheduling. */
 #define TIME_SLICE 4            /* # of timer ticks to give each thread. */
@@ -93,6 +96,7 @@ thread_init (void)
   lock_init (&tid_lock);
   list_init (&ready_list);
   list_init (&all_list);
+  list_init (&sleep_list);
 
   /* Set up a thread structure for the running thread. */
   initial_thread = running_thread ();
@@ -313,6 +317,47 @@ thread_yield (void)
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
+}
+
+void
+thread_sleep (int64_t ticks)
+{
+  struct thread *cur = thread_current ();
+  enum intr_level old_level;
+
+  ASSERT (!intr_context ());
+
+  old_level = intr_disable ();
+  if (cur != idle_thread)
+    list_push_back (&sleep_list, &cur->sleep_elem);
+  cur->status = THREAD_BLOCKED;
+  cur->wakeup_tick = ticks;
+  if ( ticks < min_ticks ) min_ticks = ticks;
+  schedule ();
+  intr_set_level (old_level);
+}
+
+void
+thread_wakeup (int64_t ticks){
+  if (ticks < min_ticks) return;
+
+  int64_t next_min = INT64_MAX;
+
+  for (struct list_elem *e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
+    struct thread *t = list_entry(e, struct thread, sleep_elem);
+    struct list_elem *next = list_next(e);
+
+    if (t->wakeup_tick <= ticks) {
+      list_remove(e);
+      thread_unblock(t);
+    }
+    else {
+      if (t->wakeup_tick < next_min)
+        next_min = t->wakeup_tick;
+    }
+
+    e = next;
+  }
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
