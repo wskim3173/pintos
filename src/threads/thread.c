@@ -335,12 +335,15 @@ thread_sleep (int64_t ticks)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread)
+  
+  if (cur != idle_thread) {
+    cur->wakeup_tick = ticks;
     list_push_back (&sleep_list, &cur->sleep_elem);
-  cur->status = THREAD_BLOCKED;
-  cur->wakeup_tick = ticks;
-  if ( ticks < min_ticks ) min_ticks = ticks;
-  schedule ();
+    if ( ticks < min_ticks ) 
+      min_ticks = ticks;
+    thread_block ();
+  }
+  
   intr_set_level (old_level);
 }
 
@@ -365,6 +368,8 @@ thread_wakeup (int64_t ticks){
 
     e = next;
   }
+
+  min_ticks = next_min;
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
