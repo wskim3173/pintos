@@ -77,7 +77,13 @@ static tid_t allocate_tid (void);
 
 bool
 thread_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) {
-  return list_entry(a, struct thread, elem)->priority > list_entry(b, struct thread, elem)->priority;
+  struct thread *t_a = list_entry(a, struct thread, elem);
+  struct thread *t_b = list_entry(b, struct thread, elem);
+
+  if (t_a == NULL || t_b == NULL)
+    return false;
+
+  return t_a->priority > t_b->priority;
 }
 
 /* Initializes the threading system by transforming the code
@@ -211,6 +217,9 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if (t->priority > thread_current()->priority)
+    thread_yield();
+
   return tid;
 }
 
@@ -319,7 +328,7 @@ thread_yield (void)
   ASSERT (!intr_context ());
 
   old_level = intr_disable ();
-  if (cur != idle_thread)
+  if (cur != idle_thread) 
     list_insert_ordered (&ready_list, &cur->elem, thread_priority_more, NULL);
   cur->status = THREAD_READY;
   schedule ();
@@ -392,14 +401,15 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  struct thread *cur = thread_current();
-  cur->priority = new_priority;
+  thread_current ()->priority = new_priority;
 
-  if (!list_empty(&ready_list)) {
-    struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
-    if (cur->priority < next->priority)
-      thread_yield();
-  }
+  if (list_empty(&ready_list))
+    return;
+
+  struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
+
+  if (thread_get_priority () < next->priority)
+    thread_yield();
 }
 
 /* Returns the current thread's priority. */
@@ -488,7 +498,7 @@ kernel_thread (thread_func *function, void *aux)
   function (aux);       /* Execute the thread function. */
   thread_exit ();       /* If function() returns, kill the thread. */
 }
-
+
 /* Returns the running thread. */
 struct thread *
 running_thread (void) 
