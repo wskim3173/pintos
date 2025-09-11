@@ -361,10 +361,9 @@ thread_wakeup (int64_t ticks){
       list_remove(e);
       thread_unblock(t);
     }
-    else {
-      if (t->wakeup_tick < next_min)
-        next_min = t->wakeup_tick;
-    }
+    
+    if (t->wakeup_tick < next_min && t->wakeup_tick > ticks)
+      next_min = t->wakeup_tick;
 
     e = next;
   }
