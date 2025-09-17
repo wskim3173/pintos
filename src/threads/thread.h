@@ -109,7 +109,9 @@ struct thread
    Controlled by kernel command-line option "-o mlfqs". */
 extern bool thread_mlfqs;
 extern bool thread_report_latency;
-extern bool thread_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+
+bool thread_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED);
+void  preempt_if_needed (void);
 
 void thread_init (void);
 void thread_start (void);
