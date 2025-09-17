@@ -416,15 +416,19 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority)
 {
-  thread_current ()->priority = new_priority;
+  struct thread *cur = thread_current();
+  cur->base_priority = cur->priority = new_priority;
 
-  if (list_empty(&ready_list))
-    return;
+  if (!list_empty(&cur->donations))
+  {
+    struct thread *t = list_entry(list_pop_front(&cur->donations), struct thread, d_elem);
+    if (t->priority > cur->priority)
+    {
+      cur->priority = t->priority;
+    }
+  }
 
-  struct thread *next = list_entry(list_front(&ready_list), struct thread, elem);
-
-  if (thread_get_priority () < next->priority)
-    thread_yield();
+  preempt_if_needed();
 }
 
 /* Returns the current thread's priority. */
@@ -550,7 +554,8 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+  t->base_priority = t->priority = priority;
+  t->waiting_on_lock = NULL;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
