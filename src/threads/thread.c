@@ -421,7 +421,8 @@ thread_set_priority (int new_priority)
 
   if (!list_empty(&cur->donations))
   {
-    struct thread *t = list_entry(list_pop_front(&cur->donations), struct thread, d_elem);
+    list_sort(&cur->donations, thread_priority_more, NULL);
+    struct thread *t = list_entry(list_front(&cur->donations), struct thread, d_elem);
     if (t->priority > cur->priority)
     {
       cur->priority = t->priority;
@@ -555,6 +556,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->base_priority = t->priority = priority;
+  //t->base_priority = t-> priority = 31;
   t->waiting_on_lock = NULL;
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;
