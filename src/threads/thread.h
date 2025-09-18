@@ -119,6 +119,7 @@ bool thread_priority_more (const struct list_elem *a, const struct list_elem *b,
 bool semaphore_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED); 
 void preempt_if_needed (void);
 void donate_priority (struct thread *t);
+void refresh_priority (struct thread *t); 
 
 void thread_init (void);
 void thread_start (void);

@@ -32,52 +32,6 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
-/*
-void debug_print_donations(struct thread *t) {
-  if(t==NULL)
-    return;
-  //printf("current pri %d\n", thread_get_priority());
-  printf("[DEBUG] thread %s (pri=%d, base=%d) donations:\n", t->name, t->priority, t->base_priority);
-
-  if(list_empty(&t->donations)) {
-    printf("  (empty)\n");
-  }
-  for(struct list_elem *e = list_begin(&t->donations); e != list_end(&t->donations); e = list_next(e))
-  {
-    struct thread *donor = list_entry(e, struct thread, d_elem);
-    printf("    -> donor %s (pri=%d, base=%d, waiting_on_lock=%p)\n", donor->name, donor->priority, donor->base_priority, donor->waiting_on_lock);
-  }
-}
-*/
-
-void
-donate_priority (struct thread *t)
-{
-  ASSERT(t != NULL);
-
-  while(t != NULL)
-  {
-    if (!list_empty(&t->donations))
-    {
-      struct thread *top = list_entry(list_front(&t->donations), struct thread, d_elem);
-
-      if (top->priority > t->priority)
-      {
-        t->priority = top->priority;
-      }
-    }
-
-    if (t->waiting_on_lock != NULL)
-    {
-      t = t->waiting_on_lock->holder;
-    }
-    else
-    {
-      break;
-    }
-  }
-}
-
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -161,11 +115,11 @@ sema_up (struct semaphore *sema)
   old_level = intr_disable ();
   if (!list_empty (&sema->waiters)) {
     list_sort(&sema->waiters, thread_priority_more, NULL);
-    thread_unblock(list_entry(list_pop_front(&sema->waiters), struct thread, elem));
+    thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
   }
   sema->value++;
 
-  preempt_if_needed();
+  preempt_if_needed ();
 
   intr_set_level (old_level);
 }
@@ -239,23 +193,22 @@ lock_init (struct lock *lock)
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
+
 void
-lock_acquire (struct lock *lock)
-{
+lock_acquire (struct lock *lock) {
   ASSERT (lock != NULL);
-  ASSERT (!intr_context ());
+  ASSERT (!intr_context());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  struct thread *cur = thread_current();
+  struct thread *cur = thread_current ();
 
-  if (lock->holder != NULL)
+  if (lock->holder != NULL) 
   {
     cur->waiting_on_lock = lock;
-    //list_push_back(&lock->holder->donations, &cur->d_elem);
-    list_insert_ordered(&lock->holder->donations, &cur->d_elem, thread_priority_more, NULL);
-
-    donate_priority(lock->holder);
+    list_push_back (&lock->holder->donations, &cur->d_elem);                    
+    donate_priority (cur);
   }
+
   sema_down (&lock->semaphore);
   cur->waiting_on_lock = NULL;
   lock->holder = cur;
@@ -286,39 +239,31 @@ lock_try_acquire (struct lock *lock)
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to release a lock within an interrupt
    handler. */
+
 void
-lock_release (struct lock *lock) 
+lock_release(struct lock *lock) 
 {
-  ASSERT (lock != NULL);
-  ASSERT (lock_held_by_current_thread (lock));
+  ASSERT(lock != NULL);
+  ASSERT(lock_held_by_current_thread(lock));
 
   struct thread *cur = thread_current();
+  struct list_elem *e;
 
-  for (struct list_elem *e = list_begin(&cur->donations); e != list_end(&cur->donations);) {
+  for (e = list_begin(&cur->donations); e != list_end(&cur->donations);) {
     struct thread *t = list_entry(e, struct thread, d_elem);
     struct list_elem *next = list_next(e);
 
-    if(t->waiting_on_lock == lock)
-    {
+    if (t->waiting_on_lock == lock) {
       list_remove(e);
     }
 
     e = next;
   }
 
-  cur->priority = cur->base_priority;
-  if (!list_empty(&cur->donations))
-  {
-    list_sort(&cur->donations, thread_priority_more, NULL);
-    struct thread *top = list_entry(list_front(&cur->donations), struct thread, d_elem);
-    if(top->priority > cur->priority)
-    {
-      cur->priority = top->priority;
-    }
-  }
-  
+  refresh_priority(cur);
+
   lock->holder = NULL;
-  sema_up (&lock->semaphore);
+  sema_up(&lock->semaphore);
 }
 
 /* Returns true if the current thread holds LOCK, false

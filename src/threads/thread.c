@@ -101,6 +101,36 @@ preempt_if_needed (void)
     thread_yield();
 }
 
+void
+donate_priority (struct thread *t) {
+  int priority = t->priority;
+  while (t != NULL) {
+    if (t->waiting_on_lock == NULL)
+      break;
+
+    t = t->waiting_on_lock->holder;
+    if (priority > t->priority)
+      t->priority = priority;
+  }
+}
+
+void
+refresh_priority (struct thread *t) {
+  ASSERT (t != NULL);
+
+  t->priority = t->base_priority;
+
+  if (!list_empty (&t->donations)) 
+  {
+    list_sort (&t->donations, thread_priority_more, NULL);
+    struct thread *top = list_entry (list_front (&t->donations), struct thread, d_elem);
+    if (top->priority > t->priority) 
+    {
+      t->priority = top->priority;
+    }
+  }
+}
+
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
    general and it is possible in this case only because loader.S
@@ -377,7 +407,8 @@ thread_wakeup (int64_t ticks){
 
   int64_t next_min = INT64_MAX;
 
-  for (struct list_elem *e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
+  struct list_elem *e;
+  for (e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
     struct thread *t = list_entry(e, struct thread, sleep_elem);
     struct list_elem *next = list_next(e);
 
@@ -414,22 +445,14 @@ thread_foreach (thread_action_func *func, void *aux)
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
 void
-thread_set_priority (int new_priority)
+thread_set_priority (int new_priority) 
 {
-  struct thread *cur = thread_current();
-  cur->base_priority = cur->priority = new_priority;
+  struct thread *cur = thread_current ();
+  cur->base_priority = new_priority;
 
-  if (!list_empty(&cur->donations))
-  {
-    list_sort(&cur->donations, thread_priority_more, NULL);
-    struct thread *t = list_entry(list_front(&cur->donations), struct thread, d_elem);
-    if (t->priority > cur->priority)
-    {
-      cur->priority = t->priority;
-    }
-  }
+  refresh_priority (cur);
 
-  preempt_if_needed();
+  preempt_if_needed ();
 }
 
 /* Returns the current thread's priority. */
