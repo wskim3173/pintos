@@ -31,12 +31,15 @@ test_priority_donate_one (void)
 
   lock_init (&lock);
   lock_acquire (&lock);
+
   thread_create ("acquire1", PRI_DEFAULT + 1, acquire1_thread_func, &lock);
   msg ("This thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 1, thread_get_priority ());
+  //debug_print_donations(thread_current());
   thread_create ("acquire2", PRI_DEFAULT + 2, acquire2_thread_func, &lock);
   msg ("This thread should have priority %d.  Actual priority: %d.",
        PRI_DEFAULT + 2, thread_get_priority ());
+  //debug_print_donations(thread_current());
   lock_release (&lock);
   msg ("acquire2, acquire1 must already have finished, in that order.");
   msg ("This should be the last line before finishing this test.");
@@ -46,7 +49,6 @@ static void
 acquire1_thread_func (void *lock_) 
 {
   struct lock *lock = lock_;
-
   lock_acquire (lock);
   msg ("acquire1: got the lock");
   lock_release (lock);
@@ -57,9 +59,24 @@ static void
 acquire2_thread_func (void *lock_) 
 {
   struct lock *lock = lock_;
-
   lock_acquire (lock);
   msg ("acquire2: got the lock");
   lock_release (lock);
   msg ("acquire2: done");
+}
+
+void debug_print_donations(struct thread *t) {
+  if(t==NULL)
+    return;
+  printf("current pri %d\n", thread_get_priority());
+  printf("[DEBUG] thread %s (pri=%d, base=%d) donations:\n", t->name, t->priority, t->base_priority);
+
+  if(list_empty(&t->donations)) {
+    printf("  (empty)\n");
+  }
+  for(struct list_elem *e = list_begin(&t->donations); e != list_end(&t->donations); e = list_next(e))
+  {
+    struct thread *donor = list_entry(e, struct thread, d_elem);
+    printf("    -> donor %s (pri=%d, base=%d, waiting_on_lock=%p)\n", donor->name, donor->priority, donor->base_priority, donor->waiting_on_lock); 
+  }
 }
