@@ -91,6 +91,9 @@ struct thread
     int base_priority;
     int nice;
     int recent_cpu;
+    int ready_time;
+    int finish_time;
+    int latency;
     struct lock *waiting_on_lock;
     int64_t wakeup_tick;
     struct list_elem allelem;           /* List element for all threads list. */

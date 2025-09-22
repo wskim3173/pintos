@@ -385,6 +385,9 @@ thread_unblock (struct thread *t)
   list_insert_ordered (&ready_list, &t->elem, thread_priority_more, NULL);
 
   t->status = THREAD_READY;
+
+  t->ready_time = timer_ticks();
+
   intr_set_level (old_level);
 }
 
@@ -435,9 +438,17 @@ thread_exit (void)
   /* Remove thread from all threads list, set our status to dying,
      and schedule another process.  That process will destroy us
      when it calls thread_schedule_tail(). */
+  
+  struct thread *cur = thread_current ();
+     
   intr_disable ();
-  list_remove (&thread_current()->allelem);
+  list_remove (&cur->allelem);
   thread_current ()->status = THREAD_DYING;
+
+  cur->finish_time = timer_ticks();
+  cur->latency = cur->finish_time - cur->ready_time;
+  printf("Thread %s completed in %d ticks.\n", cur->name, cur->latency);
+
   schedule ();
   NOT_REACHED ();
 }
