@@ -63,6 +63,7 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 bool thread_report_latency;
+int load_avg;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -103,7 +104,8 @@ preempt_if_needed (void)
 }
 
 void
-donate_priority (struct thread *t) {
+donate_priority (struct thread *t) 
+{
   int priority = t->priority;
   while (t != NULL) {
     if (t->waiting_on_lock == NULL)
@@ -116,7 +118,8 @@ donate_priority (struct thread *t) {
 }
 
 void
-refresh_priority (struct thread *t) {
+refresh_priority (struct thread *t) 
+{
   ASSERT (t != NULL);
 
   t->priority = t->base_priority;
@@ -133,22 +136,62 @@ refresh_priority (struct thread *t) {
 }
 
 void
-update_priority(struct thread *t) {
+update_priority(struct thread *t) 
+{
   if (t == idle_thread) return;
 
   t->priority = PRI_MAX - FP_TO_INT_NEAR(DIV_MIX(t->recent_cpu, 4)) - (t->nice *2);
 }
 
 void
-update_load_avg(void) {
-  
+update_recent_cpu(struct thread *t) 
+{
+  if (t == idle_thread) return;
+
+  int decay = DIV_FP(MUL_MIX(load_avg, 2), ADD_MIX(MUL_MIX(load_avg, 2), 1));
+
+  t->recent_cpu = ADD_MIX(MUL_FP(decay, t->recent_cpu), t->nice);
 }
 
 void
-update_recent_cpu(struct thread *t) {
-  if (t == idle_thread) return;
+update_load_avg(void) 
+{
+  int ready_threads = list_size(&ready_list);
+  if (thread_current() != idle_thread) 
+  {
+    ready_threads++;
+  }
 
-  //t->recent_cpu = 0;
+  load_avg = ADD_FP(DIV_MIX(MUL_MIX(load_avg, 59), 60), DIV_MIX(INT_TO_FP(ready_threads), 60));
+}
+
+void
+update_all_recent_cpu(void) 
+{
+    struct list_elem *e;
+    for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) 
+    {
+        struct thread *t = list_entry(e, struct thread, allelem);
+        update_recent_cpu(t);
+    }
+}
+
+void
+update_all_priority(void) 
+{
+    struct list_elem *e;
+    for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
+        struct thread *t = list_entry(e, struct thread, allelem);
+        update_priority(t);
+    }
+}
+
+void
+increment_recent_cpu(struct thread *t)
+{
+    if (t == idle_thread) return;
+
+    t->recent_cpu = ADD_MIX(t->recent_cpu, 1);
 }
 
 /* Initializes the threading system by transforming the code

@@ -125,6 +125,9 @@ void refresh_priority (struct thread *t);
 void update_priority(struct thread *t);
 void update_recent_cpu(struct thread *t);
 void update_load_avg(void);
+void update_all_recent_cpu(void);
+void update_all_priority(void);
+void increment_recent_cpu(struct thread *t);
 
 void thread_init (void);
 void thread_start (void);
