@@ -93,7 +93,6 @@ timer_sleep (int64_t ticks)
 
   ASSERT (intr_get_level () == INTR_ON);
 
- //if (timer_elapsed (start) < ticks)
   thread_sleep (start + ticks);
 }
 
@@ -182,15 +181,15 @@ timer_interrupt (struct intr_frame *args UNUSED)
 
     if (ticks % 4 == 0)
     {
+      update_all_priority();
       if (ticks % TIMER_FREQ == 0)
       {
          update_load_avg();
          update_all_recent_cpu();
       }
-      update_all_priority();
     }
   }
-  
+
   thread_wakeup(ticks);
 }
 
