@@ -510,6 +510,9 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
+  if (thread_mlfqs)
+    return;
+
   struct thread *cur = thread_current ();
   cur->base_priority = new_priority;
 
@@ -529,31 +532,35 @@ thread_get_priority (void)
 void
 thread_set_nice (int nice UNUSED) 
 {
-  /* Not yet implemented. */
+    struct thread *cur = thread_current ();
+    cur->nice = nice;
+
+    update_priority (cur);
+
+    preempt_if_needed ();
 }
 
 /* Returns the current thread's nice value. */
 int
 thread_get_nice (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+    struct thread *cur = thread_current ();
+    return cur->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
 thread_get_load_avg (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+  return FP_TO_INT_NEAR(MUL_MIX(load_avg, 100));
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
 thread_get_recent_cpu (void) 
 {
-  /* Not yet implemented. */
-  return 0;
+    struct thread *cur = thread_current ();
+    return FP_TO_INT_NEAR(MUL_MIX(cur->recent_cpu, 100));
 }
 
 /* Idle thread.  Executes when no other thread is ready to run.
