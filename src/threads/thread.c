@@ -80,8 +80,8 @@ static tid_t allocate_tid (void);
 bool
 thread_priority_more (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED) 
 {
-  struct thread *t_a = list_entry(a, struct thread, elem);
-  struct thread *t_b = list_entry(b, struct thread, elem);
+  struct thread *t_a = list_entry (a, struct thread, elem);
+  struct thread *t_b = list_entry (b, struct thread, elem);
 
   if (t_a == NULL || t_b == NULL)
     return false;
@@ -92,15 +92,15 @@ thread_priority_more (const struct list_elem *a, const struct list_elem *b, void
 void
 preempt_if_needed (void) 
 {
-  if (list_empty(&ready_list))
+  if (list_empty (&ready_list))
   {
     return;
   }
 
-  struct thread *t = list_entry (list_front(&ready_list), struct thread, elem);
+  struct thread *t = list_entry (list_front (&ready_list), struct thread, elem);
 
   if (t->priority > thread_get_priority ())
-    thread_yield();
+    thread_yield ();
 }
 
 void
@@ -136,62 +136,62 @@ refresh_priority (struct thread *t)
 }
 
 void
-update_priority(struct thread *t) 
+update_priority (struct thread *t) 
 {
   if (t == idle_thread) return;
 
-  t->priority = PRI_MAX - FP_TO_INT_NEAR(DIV_MIX(t->recent_cpu, 4)) - (t->nice *2);
+  t->priority = PRI_MAX - FP_TO_INT_NEAR (DIV_MIX (t->recent_cpu, 4)) - (t->nice *2);
 }
 
 void
-update_recent_cpu(struct thread *t) 
+update_recent_cpu (struct thread *t) 
 {
   if (t == idle_thread) return;
 
-  int decay = DIV_FP(MUL_MIX(load_avg, 2), ADD_MIX(MUL_MIX(load_avg, 2), 1));
+  int decay = DIV_FP (MUL_MIX (load_avg, 2), ADD_MIX (MUL_MIX (load_avg, 2), 1));
 
-  t->recent_cpu = ADD_MIX(MUL_FP(decay, t->recent_cpu), t->nice);
+  t->recent_cpu = ADD_MIX (MUL_FP (decay, t->recent_cpu), t->nice);
 }
 
 void
-update_load_avg(void) 
+update_load_avg (void) 
 {
-  int ready_threads = list_size(&ready_list);
-  if (thread_current() != idle_thread) 
+  int ready_threads = list_size (&ready_list);
+  if (thread_current () != idle_thread) 
   {
     ready_threads++;
   }
 
-  load_avg = ADD_FP(DIV_MIX(MUL_MIX(load_avg, 59), 60), DIV_MIX(INT_TO_FP(ready_threads), 60));
+  load_avg = ADD_FP (DIV_MIX (MUL_MIX (load_avg, 59), 60), DIV_MIX (INT_TO_FP (ready_threads), 60));
 }
 
 void
-update_all_recent_cpu(void) 
+update_all_recent_cpu (void) 
 {
     struct list_elem *e;
-    for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) 
+    for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) 
     {
-        struct thread *t = list_entry(e, struct thread, allelem);
-        update_recent_cpu(t);
+        struct thread *t = list_entry (e, struct thread, allelem);
+        update_recent_cpu (t);
     }
 }
 
 void
-update_all_priority(void) 
+update_all_priority (void) 
 {
     struct list_elem *e;
-    for (e = list_begin(&all_list); e != list_end(&all_list); e = list_next(e)) {
-        struct thread *t = list_entry(e, struct thread, allelem);
-        update_priority(t);
+    for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
+        struct thread *t = list_entry (e, struct thread, allelem);
+        update_priority (t);
     }
 }
 
 void
-increment_recent_cpu(struct thread *t)
+increment_recent_cpu (struct thread *t)
 {
     if (t == idle_thread) return;
 
-    t->recent_cpu = ADD_MIX(t->recent_cpu, 1);
+    t->recent_cpu = ADD_MIX (t->recent_cpu, 1);
 }
 
 /* Initializes the threading system by transforming the code
@@ -465,19 +465,20 @@ thread_sleep (int64_t ticks)
 }
 
 void
-thread_wakeup (int64_t ticks){
+thread_wakeup (int64_t ticks)
+{
   if (ticks < min_ticks) return;
 
   int64_t next_min = INT64_MAX;
 
   struct list_elem *e;
-  for (e = list_begin(&sleep_list); e != list_end(&sleep_list);) {
-    struct thread *t = list_entry(e, struct thread, sleep_elem);
+  for (e = list_begin (&sleep_list); e != list_end (&sleep_list);) {
+    struct thread *t = list_entry (e, struct thread, sleep_elem);
     struct list_elem *next = list_next(e);
 
     if (t->wakeup_tick <= ticks) {
-      list_remove(e);
-      thread_unblock(t);
+      list_remove (e);
+      thread_unblock (t);
     }
     
     if (t->wakeup_tick < next_min && t->wakeup_tick > ticks)
