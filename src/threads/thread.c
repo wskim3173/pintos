@@ -386,7 +386,10 @@ thread_unblock (struct thread *t)
 
   t->status = THREAD_READY;
 
-  t->ready_time = timer_ticks();
+  if (thread_report_latency)
+  {
+    t->ready_time = timer_ticks();
+  }
 
   intr_set_level (old_level);
 }
@@ -440,14 +443,17 @@ thread_exit (void)
      when it calls thread_schedule_tail(). */
   
   struct thread *cur = thread_current ();
-     
+
+  if(thread_report_latency)
+  {
+    cur->finish_time = timer_ticks();
+    cur->latency = cur->finish_time - cur->ready_time;
+    printf("Thread %s completed in %d ticks.\n", cur->name, cur->latency);
+  }
+
   intr_disable ();
   list_remove (&cur->allelem);
   thread_current ()->status = THREAD_DYING;
-
-  cur->finish_time = timer_ticks();
-  cur->latency = cur->finish_time - cur->ready_time;
-  printf("Thread %s completed in %d ticks.\n", cur->name, cur->latency);
 
   schedule ();
   NOT_REACHED ();
