@@ -11,6 +11,7 @@
 #include "threads/switch.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
+#include "threads/fixed-point.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -129,6 +130,25 @@ refresh_priority (struct thread *t) {
       t->priority = top->priority;
     }
   }
+}
+
+void
+update_priority(struct thread *t) {
+  if (t == idle_thread) return;
+
+  t->priority = PRI_MAX - FP_TO_INT_NEAR(DIV_MIX(t->recent_cpu, 4)) - (t->nice *2);
+}
+
+void
+update_load_avg(void) {
+  
+}
+
+void
+update_recent_cpu(struct thread *t) {
+  if (t == idle_thread) return;
+
+  //t->recent_cpu = 0;
 }
 
 /* Initializes the threading system by transforming the code
@@ -579,7 +599,8 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->base_priority = t->priority = priority;
-  //t->base_priority = t-> priority = 31;
+  t->nice = 0;
+  t->recent_cpu = 0;
   t->waiting_on_lock = NULL;
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;

@@ -89,6 +89,8 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     int base_priority;
+    int nice;
+    int recent_cpu;
     struct lock *waiting_on_lock;
     int64_t wakeup_tick;
     struct list_elem allelem;           /* List element for all threads list. */
@@ -120,6 +122,9 @@ bool semaphore_priority_more (const struct list_elem *a, const struct list_elem 
 void preempt_if_needed (void);
 void donate_priority (struct thread *t);
 void refresh_priority (struct thread *t); 
+void update_priority(struct thread *t);
+void update_recent_cpu(struct thread *t);
+void update_load_avg(void);
 
 void thread_init (void);
 void thread_start (void);
