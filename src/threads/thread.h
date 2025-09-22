@@ -122,6 +122,7 @@ bool semaphore_priority_more (const struct list_elem *a, const struct list_elem 
 void preempt_if_needed (void);
 void donate_priority (struct thread *t);
 void refresh_priority (struct thread *t); 
+void clear_lock_donations (struct thread *t, struct lock *lock);
 void update_priority (struct thread *t);
 void update_recent_cpu (struct thread *t);
 void update_load_avg (void);

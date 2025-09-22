@@ -251,18 +251,8 @@ lock_release(struct lock *lock)
   if (!thread_mlfqs)
   {
     struct thread *cur = thread_current ();
-    struct list_elem *e;
-
-    for (e = list_begin (&cur->donations); e != list_end (&cur->donations);) {
-      struct thread *t = list_entry (e, struct thread, d_elem);
-      struct list_elem *next = list_next (e);
-
-      if (t->waiting_on_lock == lock) {
-        list_remove(e);
-      }
-
-      e = next;
-    }
+    
+    clear_lock_donations (cur, lock);
 
     refresh_priority (cur);
   }
