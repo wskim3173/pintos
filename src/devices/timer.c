@@ -181,12 +181,13 @@ timer_interrupt (struct intr_frame *args UNUSED)
 
     if (ticks % 4 == 0)
     {
-      update_all_priority();
+      
       if (ticks % TIMER_FREQ == 0)
       {
          update_load_avg();
          update_all_recent_cpu();
       }
+      update_all_priority();
     }
   }
 

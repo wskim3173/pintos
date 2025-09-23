@@ -179,6 +179,9 @@ struct thread
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
 
+>> In thread_set_priority, interrupts are disabled during the priority update to prevent race conditions.
+>> A lock cannot be used because interrupt handlers also access shared data, and blocking there could lead to deadlock.
+
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
@@ -193,6 +196,23 @@ struct thread
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+thread.h
+struct thread
+{
+  ...
+  int nice;
+  int recent_cpu;
+  ...
+};
+
+>> nice is the user-set priority adjustment.
+>> recent_cpu is the per-thread measure of recent CPU usage.
+
+thread.c
+int load_avg;
+
+>> load_avg is the system-wide moving average of ready threads.
+
 ---- ALGORITHMS ----
 
 >> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
@@ -203,23 +223,29 @@ struct thread
 timer  recent_cpu    priority   thread
 ticks   A   B   C   A   B   C   to run
 -----  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
+ 0      0   0   0  63  61  59     A    
+ 4      4   0   0  62  61  59     A
+ 8      8   0   0  61  61  59     A
+12     12   0   0  60  61  59     B
+16     12   4   0  60  60  59     B
+20     12   8   0  60  59  59     A
+24     16   8   0  59  59  59     A
+28     20   8   0  58  59  59     C
+32     20   8   4  58  59  58     B
+36     20   12  4  58  58  58     C
 
 >> C3: Did any ambiguities in the scheduler specification make values
 >> in the table uncertain?  If so, what rule did you use to resolve
 >> them?  Does this match the behavior of your scheduler?
 
+>> If threads B and C have the same priority, it is ambiguous which thread will run.
+>> I modified thread_priority_more() so that when priorities are the same, the thread with the smaller recent_cpu runs.
+
 >> C4: How is the way you divided the cost of scheduling between code
 >> inside and outside interrupt context likely to affect performance?
+
+>> I disabled interrupts when accessing shared resources between threads, such as ready_list, min_ticks and load_avg.
+>> Interrupts in thread_set_priority and thread_set_nice are also disabled as they can also cause preemption.
 
 ---- RATIONALE ----
 

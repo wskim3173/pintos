@@ -12,6 +12,7 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/fixed-point.h"
+#include "devices/timer.h"
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
@@ -86,7 +87,14 @@ thread_priority_more (const struct list_elem *a, const struct list_elem *b, void
   if (t_a == NULL || t_b == NULL)
     return false;
 
-  return t_a->priority > t_b->priority;
+  if (t_a->priority != t_b->priority)
+  {
+    return t_a->priority > t_b->priority;
+  }
+  else
+  {
+    return t_a->recent_cpu < t_b->recent_cpu;
+  }
 }
 
 void
@@ -120,6 +128,7 @@ donate_priority (struct thread *t)
 void
 refresh_priority (struct thread *t) 
 {
+  enum intr_level old_level = intr_disable ();     
   ASSERT (t != NULL);
 
   t->priority = t->base_priority;
@@ -133,11 +142,13 @@ refresh_priority (struct thread *t)
       t->priority = top->priority;
     }
   }
+  intr_set_level (old_level);    
 }
 
 void
 clear_lock_donations (struct thread *t, struct lock *lock)
 {
+  enum intr_level old_level = intr_disable ();   
   struct list_elem *e;
 
   for (e = list_begin (&t->donations); e != list_end (&t->donations);) {
@@ -150,6 +161,7 @@ clear_lock_donations (struct thread *t, struct lock *lock)
 
     e = next;
   }
+  intr_set_level (old_level);   
 }
 
 void
@@ -173,6 +185,7 @@ update_recent_cpu (struct thread *t)
 void
 update_load_avg (void) 
 {
+  enum intr_level old_level = intr_disable ();  
   int ready_threads = list_size (&ready_list);
   if (thread_current () != idle_thread) 
   {
@@ -180,27 +193,32 @@ update_load_avg (void)
   }
 
   load_avg = ADD_FP (DIV_MIX (MUL_MIX (load_avg, 59), 60), DIV_MIX (INT_TO_FP (ready_threads), 60));
+  intr_set_level (old_level);  
 }
 
 void
 update_all_recent_cpu (void) 
 {
-    struct list_elem *e;
-    for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) 
-    {
-        struct thread *t = list_entry (e, struct thread, allelem);
-        update_recent_cpu (t);
-    }
+  enum intr_level old_level = intr_disable ();   
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) 
+  {
+      struct thread *t = list_entry (e, struct thread, allelem);
+      update_recent_cpu (t);
+  }
+  intr_set_level (old_level);   
 }
 
 void
 update_all_priority (void) 
 {
-    struct list_elem *e;
-    for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
-        struct thread *t = list_entry (e, struct thread, allelem);
-        update_priority (t);
-    }
+  enum intr_level old_level = intr_disable ();   
+  struct list_elem *e;
+  for (e = list_begin (&all_list); e != list_end (&all_list); e = list_next (e)) {
+      struct thread *t = list_entry (e, struct thread, allelem);
+      update_priority (t);
+  }
+  intr_set_level (old_level);   
 }
 
 void
@@ -502,10 +520,13 @@ thread_sleep (int64_t ticks)
 void
 thread_wakeup (int64_t ticks)
 {
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   if (ticks < min_ticks) return;
-
+  
   int64_t next_min = INT64_MAX;
-
+  
   struct list_elem *e;
   for (e = list_begin (&sleep_list); e != list_end (&sleep_list);) 
   {
@@ -525,6 +546,7 @@ thread_wakeup (int64_t ticks)
   }
 
   min_ticks = next_min;
+  intr_set_level (old_level); 
 }
 
 /* Invoke function 'func' on all threads, passing along 'aux'.
@@ -552,11 +574,12 @@ thread_set_priority (int new_priority)
     return;
 
   struct thread *cur = thread_current ();
+ 
+  enum intr_level old_level = intr_disable (); 
   cur->base_priority = new_priority;
-
   refresh_priority (cur);
-
   preempt_if_needed ();
+  intr_set_level (old_level);  
 }
 
 /* Returns the current thread's priority. */
@@ -571,11 +594,12 @@ void
 thread_set_nice (int nice UNUSED) 
 {
     struct thread *cur = thread_current ();
+
+    enum intr_level old_level = intr_disable ();
     cur->nice = nice;
-
     update_priority (cur);
-
     preempt_if_needed ();
+    intr_set_level (old_level);    
 }
 
 /* Returns the current thread's nice value. */
