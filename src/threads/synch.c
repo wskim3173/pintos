@@ -113,7 +113,8 @@ sema_up (struct semaphore *sema)
   ASSERT (sema != NULL);
 
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) {
+  if (!list_empty (&sema->waiters)) 
+  {
     list_sort (&sema->waiters, thread_priority_more, NULL);
     thread_unblock (list_entry (list_pop_front (&sema->waiters), struct thread, elem));
   }
@@ -195,7 +196,8 @@ lock_init (struct lock *lock)
    we need to sleep. */
 
 void
-lock_acquire (struct lock *lock) {
+lock_acquire (struct lock *lock) 
+{
   ASSERT (lock != NULL);
   ASSERT (!intr_context());
   ASSERT (!lock_held_by_current_thread (lock));
@@ -366,7 +368,8 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   ASSERT (!intr_context ());
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&cond->waiters)) {
+  if (!list_empty (&cond->waiters)) 
+  {
     list_sort (&cond->waiters, semaphore_priority_more, NULL);
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);

@@ -388,7 +388,7 @@ thread_unblock (struct thread *t)
 
   if (thread_report_latency)
   {
-    t->ready_time = timer_ticks();
+    t->ready_time = timer_ticks ();
   }
 
   intr_set_level (old_level);
@@ -444,11 +444,11 @@ thread_exit (void)
   
   struct thread *cur = thread_current ();
 
-  if(thread_report_latency)
+  if (thread_report_latency)
   {
-    cur->finish_time = timer_ticks();
+    cur->finish_time = timer_ticks ();
     cur->latency = cur->finish_time - cur->ready_time;
-    printf("Thread %s completed in %d ticks.\n", cur->name, cur->latency);
+    printf ("Thread %s completed in %d ticks.\n", cur->name, cur->latency);
   }
 
   intr_disable ();
@@ -487,7 +487,8 @@ thread_sleep (int64_t ticks)
 
   old_level = intr_disable ();
   
-  if (cur != idle_thread) {
+  if (cur != idle_thread) 
+  {
     cur->wakeup_tick = ticks;
     list_push_back (&sleep_list, &cur->sleep_elem);
     if ( ticks < min_ticks ) 
