@@ -77,12 +77,15 @@ thread_wakeup() unblocks the threads in the sleep_list whose wake-up time has ar
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
 
->>Similarly, since interrupts are disabled, the timer interrupt is delayed, and timer_sleep is guaranteed atomicity.
+>> Similarly, since interrupts are disabled, the timer interrupt is delayed, and timer_sleep is guaranteed atomicity.
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+>> A thread waits in the sleep_list and wakes up when its time comes, so the CPU can do other work in the meantime, making it efficient.
+>> And by keeping track of the wakeup_tick of the next thread to wake up in the sleep_list, I eliminated the waste of searching through the sleep_list on every tick.
 
              PRIORITY SCHEDULING
              ===================
@@ -187,6 +190,11 @@ struct thread
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
 
+>> I used priority donation to prevent situations where a higher-priority thread cannot run, and also designed it to handle nested and multiple donation scenarios.
+>> So the system becomes more responsive to the user.
+
+
+
               ADVANCED SCHEDULER
               ==================
 
@@ -254,12 +262,18 @@ ticks   A   B   C   A   B   C   to run
 >> time to work on this part of the project, how might you choose to
 >> refine or improve your design?
 
+>> I built a fairer scheduler using nice and recent_cpu. However, there is still room for improvement. 
+>> Instead of maintaining a single ready queue with O(n) search complexity, we could divide the ready queue into multiple priority groups. >> This multilevel queue design would reduce traversal time and make scheduling decisions faster.
+
 >> C6: The assignment explains arithmetic for fixed-point math in
 >> detail, but it leaves it open to you to implement it.  Why did you
 >> decide to implement it the way you did?  If you created an
 >> abstraction layer for fixed-point math, that is, an abstract data
 >> type and/or a set of functions or macros to manipulate fixed-point
 >> numbers, why did you do so?  If not, why not?
+
+>> I converted integers into fixed-point format by shifting them and then performed the calculations.
+>> For details, please refer to fixed-point.h
 
                SURVEY QUESTIONS
                ================
