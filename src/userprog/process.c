@@ -28,7 +28,7 @@ static bool load (const char *cmdline, void (**eip) (void), void **esp);
 tid_t
 process_execute (const char *file_name) 
 {
-  char *fn_copy;
+  char *fn_copy, *tmp;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -38,8 +38,16 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  tmp = palloc_get_page (0);
+  if (tmp == NULL)
+    return TID_ERROR;
+  strlcpy (tmp, file_name, PGSIZE);
+
+  char *save_ptr;
+  char *prog = strtok_r (tmp, " ", &save_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (prog, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -54,6 +62,13 @@ start_process (void *file_name_)
   struct intr_frame if_;
   bool success;
 
+	char *ptr, *arg;
+  int arg_cnt = 0;
+  char *arg_list[32];
+
+  for (arg = strtok_r (file_name, " ", &ptr); arg != NULL; arg = strtok_r (NULL, " ", &ptr))
+    arg_list[arg_cnt++] = arg;
+
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -61,10 +76,14 @@ start_process (void *file_name_)
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (file_name, &if_.eip, &if_.esp);
 
+  argument_stack (arg_list, arg_cnt, &if_);
+
   /* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
     thread_exit ();
+
+  hex_dump ((uintptr_t)if_.esp, (const void *)if_.esp, (size_t)((uintptr_t)PHYS_BASE - (uintptr_t)if_.esp), true);
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -74,6 +93,45 @@ start_process (void *file_name_)
      and jump to it. */
   asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
   NOT_REACHED ();
+}
+
+void argument_stack(char **argv, int argc, struct intr_frame *if_) {
+  enum { MAX_ARGC = 128 };
+  if (argc < 0 || argc > MAX_ARGC) return;
+
+  uint8_t *sp = (uint8_t *)if_->esp;
+  char *arg_addr[MAX_ARGC];
+
+  int i;
+  for (i = argc - 1; i >= 0; --i) {
+    size_t len = strlen(argv[i]) + 1;
+    sp -= len;
+    memcpy(sp, argv[i], len);
+    arg_addr[i] = (char *)sp;
+  }
+
+  sp = (uint8_t *)(((uintptr_t)sp) & ~((uintptr_t)3));
+
+  sp -= sizeof(char *);
+  *(char **)sp = NULL;
+
+  for (i = argc - 1; i >= 0; --i) {
+    sp -= sizeof(char *);
+    *(char **)sp = arg_addr[i];
+  }
+
+  char **user_argv = (char **)sp;
+
+  sp -= sizeof(char **);
+  *(char ***)sp = user_argv;           // argv
+
+  sp -= sizeof(int);
+  *(int *)sp = argc;                   // argc
+
+  sp -= sizeof(void *);
+  *(void **)sp = NULL;                 // fake return address
+
+  if_->esp = (void *)sp;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
@@ -88,6 +146,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while (1){} // for debugging
   return -1;
 }
 

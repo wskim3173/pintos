@@ -108,7 +108,12 @@ preempt_if_needed (void)
   struct thread *t = list_entry (list_front (&ready_list), struct thread, elem);
 
   if (t->priority > thread_get_priority ())
-    thread_yield ();
+  {
+    if (intr_context ())
+      intr_yield_on_return ();
+    else
+      thread_yield ();
+  }
 }
 
 void
