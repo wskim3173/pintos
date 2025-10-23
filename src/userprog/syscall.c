@@ -451,6 +451,12 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_FILESIZE:{ int fd = get_int_arg(u_esp,0); f->eax = sys_filesize(fd); break; }
     case SYS_SEEK:   { int fd = get_int_arg(u_esp,0); unsigned pos=(unsigned)get_int_arg(u_esp,1); sys_seek(fd,pos); break; }
     case SYS_TELL:   { int fd = get_int_arg(u_esp,0); f->eax = sys_tell(fd); break; }
+    case SYS_PIPE: {
+      void *u_fds = (void *) get_ptr_arg(u_esp, 0);
+      // 아직 미구현이면 안전하게 실패 반환
+      f->eax = -1;
+      break;
+    }
     default:
       do_exit(-1);
   }

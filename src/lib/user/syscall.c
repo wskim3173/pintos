@@ -141,6 +141,12 @@ close (int fd)
   syscall1 (SYS_CLOSE, fd);
 }
 
+int
+pipe (int fds[2])
+{
+  return (int) syscall1 (SYS_PIPE, fds);
+}
+
 mapid_t
 mmap (int fd, void *addr)
 {
