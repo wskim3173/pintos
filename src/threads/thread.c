@@ -9,7 +9,6 @@
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
-#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/fixed-point.h"
 #include "devices/timer.h"
@@ -721,6 +720,10 @@ init_thread (struct thread *t, const char *name, int priority)
   t->waiting_on_lock = NULL;
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;
+
+  t->parent = NULL;
+  list_init(&t->children);
+  t->exit_status = -1;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
