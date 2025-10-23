@@ -58,6 +58,9 @@ copy_in (void *dst, const void *usrc, size_t n)
   size_t i;
 
   for (i = 0; i < n; i++) {
+    if (up == NULL || !is_user_vaddr(up))
+      do_exit(-1);
+
     int ch = get_user(up);
     if (ch == -1) do_exit(-1);
     *kd = (uint8_t)ch;
