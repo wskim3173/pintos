@@ -24,6 +24,7 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+#define MAX_FD 128
 
 /* 부모가 자식을 wait할 때 쓸 디스크립터 */
 struct child_desc {
@@ -112,6 +113,8 @@ struct thread
    struct thread *parent;
    struct list children;      /* child_desc 리스트 */
    int exit_status;
+   struct file *fd_table[MAX_FD];
+   int next_fd;               /* 다음 할당 시작 지점 (>=2) */   
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

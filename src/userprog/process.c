@@ -296,6 +296,14 @@ process_exit (void)
 
   cur = thread_current ();
 
+  int i;
+  for (i = 2; i < MAX_FD; i++) {
+    if (cur->fd_table[i] != NULL) {
+      file_close(cur->fd_table[i]);
+      cur->fd_table[i] = NULL;
+    }
+  }  
+
   /* 부모에게 종료 상태 전달 + 깨우기 */
   if (cur->parent != NULL)
     {
