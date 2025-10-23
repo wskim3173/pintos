@@ -32,7 +32,7 @@ our (@disks);			# Extra disk images to pass to simulator.
 our ($loader_fn);		# Bootstrap loader.
 our (%geometry);		# IDE disk geometry.
 our ($align);			# Partition alignment.
-our ($gdb_port) = $ENV{"GDB_PORT"} || "1234"; # Port to listen on for GDB
+our ($gdb_port) = $ENV{"GDB_PORT"} || "20254192"; # Port to listen on for GDB
 
 parse_command_line ();
 prepare_scratch_disk ();
