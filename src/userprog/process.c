@@ -304,6 +304,13 @@ process_exit (void)
     }
   }  
 
+  /* 실행 파일 쓰기 금지 해제 및 닫기 */
+  if (cur->exec_file != NULL) {
+    file_allow_write(cur->exec_file);
+    file_close(cur->exec_file);
+    cur->exec_file = NULL;
+  }
+
   /* 부모에게 종료 상태 전달 + 깨우기 */
   if (cur->parent != NULL)
     {
@@ -417,6 +424,9 @@ load (const char *file_name, void (**eip) (void), void **esp)
       goto done; 
     }
 
+  t->exec_file = file;
+  file_deny_write(file);
+  
   if (file_read (file, &ehdr, sizeof ehdr) != sizeof ehdr
       || memcmp (ehdr.e_ident, "\177ELF\1\1\1", 7)
       || ehdr.e_type != 2
@@ -490,7 +500,11 @@ load (const char *file_name, void (**eip) (void), void **esp)
   success = true;
 
  done:
-  file_close (file);
+  if (!success && file != NULL) {
+    /* 실패 시에만 닫기 */
+    file_close(file);
+    t->exec_file = NULL;
+  }
   return success;
 }
 

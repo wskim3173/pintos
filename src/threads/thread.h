@@ -115,6 +115,7 @@ struct thread
    int exit_status;
    struct file *fd_table[MAX_FD];
    int next_fd;               /* 다음 할당 시작 지점 (>=2) */   
+   struct file *exec_file;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

@@ -728,7 +728,8 @@ init_thread (struct thread *t, const char *name, int priority)
   int i;
   for (i = 0; i < MAX_FD; i++) t->fd_table[i] = NULL;
   t->next_fd = 2;  /* 0=stdin, 1=stdout 예약 */
-
+  t->exec_file = NULL;
+  
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
