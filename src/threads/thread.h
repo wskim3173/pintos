@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +24,17 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+#define MAX_FD 128
+
+/* 부모가 자식을 wait할 때 쓸 디스크립터 */
+struct child_desc {
+  tid_t tid;
+  int exit_status;
+  bool exited;
+  bool waited;
+  struct semaphore sema;     /* 자식이 exit 시 up */
+  struct list_elem elem;     /* 부모의 children 리스트에 연결 */
+};
 
 /* A kernel thread or user process.
 
@@ -97,6 +109,16 @@ struct thread
     struct lock *waiting_on_lock;
     int64_t wakeup_tick;
     struct list_elem allelem;           /* List element for all threads list. */
+
+   struct thread *parent;
+   struct list children;      /* child_desc 리스트 */
+   int exit_status;
+   struct file *fd_table[MAX_FD];
+   int next_fd;               /* 다음 할당 시작 지점 (>=2) */   
+   struct file *exec_file;
+
+   struct pipe *stdin_pipe;   // NULL이면 콘솔, 비NULL이면 파이프에서 읽기
+   int pending_stdin_fd;      // 다음 exec에서 stdin으로 넘길 fd (부모 쪽 임시 저장), 기본 -1
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

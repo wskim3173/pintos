@@ -151,11 +151,27 @@ page_fault (struct intr_frame *f)
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
      which fault_addr refers. */
-  printf ("Page fault at %p: %s error %s page in %s context.\n",
+   /*
+   printf ("Page fault at %p: %s error %s page in %s context.\n",
           fault_addr,
           not_present ? "not present" : "rights violation",
           write ? "writing" : "reading",
           user ? "user" : "kernel");
-  kill (f);
+   kill (f);       
+  */
+
+  /* 커널-PF: get_user/put_user fixup 경로 (조용히 복귀) */
+  if (!user) {
+    f->eip = (void *) f->eax;    // 1: 라벨로 점프
+    f->eax = 0xFFFFFFFF;         // get_user() == -1
+    return;
+  }
+
+  /* 사용자-PF: 테스트 기대대로 exit(-1) */
+  struct thread *t = thread_current();
+  t->exit_status = -1;
+  printf("%s: exit(-1)\n", t->name);
+  thread_exit();
+  NOT_REACHED();
 }
 

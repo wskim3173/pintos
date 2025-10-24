@@ -2,6 +2,28 @@
 #define FILESYS_FILE_H
 
 #include "filesys/off_t.h"
+#include <stdbool.h>
+
+enum fd_type {
+  FD_REGULAR = 0,
+  FD_STDIN,
+  FD_STDOUT,
+  FD_STDERR,
+  FD_PIPE_READ,
+  FD_PIPE_WRITE,
+};
+
+struct pipe;
+
+/* An open file. */
+struct file 
+  {
+    struct inode *inode;        /* File's inode. */
+    off_t pos;                  /* Current position. */
+    bool deny_write;            /* Has file_deny_write() been called? */
+    struct pipe *pipe;
+    enum fd_type file_type;
+  };
 
 struct inode;
 

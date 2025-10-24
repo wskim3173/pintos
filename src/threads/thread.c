@@ -9,7 +9,6 @@
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
-#include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/fixed-point.h"
 #include "devices/timer.h"
@@ -108,7 +107,12 @@ preempt_if_needed (void)
   struct thread *t = list_entry (list_front (&ready_list), struct thread, elem);
 
   if (t->priority > thread_get_priority ())
-    thread_yield ();
+  {
+    if (intr_context ())
+      intr_yield_on_return ();
+    else
+      thread_yield ();
+  }
 }
 
 void
@@ -716,6 +720,18 @@ init_thread (struct thread *t, const char *name, int priority)
   t->waiting_on_lock = NULL;
   list_init (&t->donations);
   t->magic = THREAD_MAGIC;
+
+  t->parent = NULL;
+  list_init(&t->children);
+  t->exit_status = -1;
+
+  int i;
+  for (i = 0; i < MAX_FD; i++) t->fd_table[i] = NULL;
+  t->next_fd = 2;  /* 0=stdin, 1=stdout 예약 */
+  t->exec_file = NULL;
+  
+  t->stdin_pipe = NULL;
+  t->pending_stdin_fd = -1;
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
