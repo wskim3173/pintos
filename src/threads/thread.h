@@ -117,6 +117,9 @@ struct thread
    int next_fd;               /* 다음 할당 시작 지점 (>=2) */   
    struct file *exec_file;
 
+   struct pipe *stdin_pipe;   // NULL이면 콘솔, 비NULL이면 파이프에서 읽기
+   int pending_stdin_fd;      // 다음 exec에서 stdin으로 넘길 fd (부모 쪽 임시 저장), 기본 -1
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
     struct list_elem sleep_elem;

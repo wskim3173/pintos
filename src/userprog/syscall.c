@@ -7,8 +7,8 @@
 #include "devices/shutdown.h"
 #include "filesys/filesys.h"
 #include "userprog/process.h"
-#include "threads/palloc.h"     /* copy_in_string에서 사용 */
-#include "devices/input.h"        /* input_getc */
+#include "threads/palloc.h"
+#include "devices/input.h"
 #include "filesys/file.h"
 
 static struct lock filesys_lock;
@@ -282,55 +282,84 @@ static void fd_close(struct thread *t, int fd) {
   }
 }
 
-/* read: fd==0(stdin) 특별 처리, 그 외 파일에서 읽기 */
 static int sys_read(int fd, void *u_buf, unsigned size) {
   struct thread *cur = thread_current();
-  unsigned remain;
-  size_t chunk;
-  void *kpage;
-  int total = 0;
-
   if (size == 0) return 0;
-  if (fd == 1) return -1;           /* stdout에 read 불가 */
+  if (fd == 1) return -1;  /* stdout에서 read 불가 */
 
-  kpage = palloc_get_page(0);
-  if (kpage == NULL) do_exit(-1);
-
+  // 🔹 stdin 리다이렉션: 파이프가 붙어 있으면 파이프에서 읽기
   if (fd == 0) {
-    /* 콘솔 입력: 바이트씩 받아서 user 버퍼로 복사 */
-    remain = size;
+    if (cur->stdin_pipe) {
+      // kpage 중계 (copy_out)
+      void *kpage = palloc_get_page(0);
+      if (!kpage) do_exit(-1);
+
+      unsigned remain = size; int total = 0;
+      while (remain > 0) {
+        size_t chunk = remain > PGSIZE ? PGSIZE : remain;
+        int n = pipe_read(cur->stdin_pipe, kpage, chunk);
+        if (n <= 0) break; // EOF or no data
+        if (!copy_out((uint8_t*)u_buf + total, kpage, (size_t)n)) {
+          palloc_free_page(kpage); do_exit(-1);
+        }
+        total += n; remain -= (unsigned)n;
+        if ((size_t)n < chunk) break;
+      }
+      palloc_free_page(kpage);
+      return total;
+    } else {
+      // 기존 콘솔 입력 경로
+      unsigned remain = size; int total = 0;
+      while (remain--) {
+        uint8_t c = input_getc();
+        if (!copy_out((uint8_t*)u_buf + total, &c, 1)) do_exit(-1);
+        total++;
+      }
+      return total;
+    }
+  }
+
+  struct file *f = fd_get(cur, fd);
+  if (!f) return -1;
+
+  /* 🔹 파이프 READ: pipe_read → kpage → copy_out */
+  if (f->file_type == FD_PIPE_READ) {
+    void *kpage = palloc_get_page(0);
+    if (!kpage) do_exit(-1);
+
+    unsigned remain = size;
+    int total = 0;
     while (remain > 0) {
-      uint8_t c = input_getc();
-      if (!copy_out((uint8_t*)u_buf + total, &c, 1)) { /* 필요시 copy_out 구현 */
+      size_t chunk = remain > PGSIZE ? PGSIZE : remain;
+      int n = pipe_read(f->pipe, kpage, chunk);
+      if (n <= 0) break;                 /* 0=EOF */
+      if (!copy_out((uint8_t*)u_buf + total, kpage, (size_t)n)) {
         palloc_free_page(kpage);
         do_exit(-1);
       }
-      total++;
-      remain--;
+      total += n;
+      remain -= (unsigned)n;
+      if ((size_t)n < chunk) break;      /* 파이프에 더 없음 */
     }
     palloc_free_page(kpage);
     return total;
-  } else {
-    struct file *f = fd_get(cur, fd);
-    int n;
-    if (f == NULL) { palloc_free_page(kpage); return -1; }
+  }
 
-    /* 🔹 파이프의 read end일 경우: pipe_read 호출 */
-    if (f->file_type == FD_PIPE_READ) {
-      palloc_free_page(kpage);
-      return pipe_read(f->pipe, u_buf, size);
-    }
-    /* 🔹 파이프의 write end로 read 요청하면 -1 */
-    if (f->file_type == FD_PIPE_WRITE) {
-      palloc_free_page(kpage);
-      return -1;
-    }
+  /* 🔹 파이프 WRITE로 read 요청 → 에러 */
+  if (f->file_type == FD_PIPE_WRITE)
+    return -1;
 
+  /* 일반 파일 경로: 기존 로직 (kpage로 받아 copy_out) */
+  {
+    void *kpage = palloc_get_page(0);
+    if (!kpage) do_exit(-1);
+
+    unsigned remain = size;
+    int total = 0;
     lock_acquire(&filesys_lock);
-    remain = size;
     while (remain > 0) {
-      chunk = remain > PGSIZE ? PGSIZE : remain;
-      n = file_read(f, kpage, (off_t)chunk);
+      size_t chunk = remain > PGSIZE ? PGSIZE : remain;
+      int n = file_read(f, kpage, (off_t)chunk);
       if (n < 0) { total = -1; break; }
       if (n == 0) break;
       if (!copy_out((uint8_t*)u_buf + total, kpage, (size_t)n)) {
@@ -348,43 +377,54 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
   }
 }
 
-/* write: fd==1(stdout) or 파일 */
 static int sys_write(int fd, const void *u_buf, unsigned size) {
   struct thread *cur = thread_current();
-  if (fd == 0) return -1;
-
-  /* 이미 stdout 전용 write_stdout이 있다면 그걸 호출해도 됨 */
+  if (fd == 0) return -1;               /* stdin에 write 불가 */
+  if (size == 0) return 0;
   if (fd == 1) return write_stdout(u_buf, size);
 
-  /* 파일로 쓰기 */
-  {
-    struct file *f = fd_get(cur, fd);
-    void *kpage;
-    unsigned remain;
-    size_t chunk;
-    int total = 0, n;
+  struct file *f = fd_get(cur, fd);
+  if (!f) return -1;
 
-    if (f == NULL) return -1;
-    if (size == 0) return 0;
+  /* 🔹 파이프 WRITE: copy_in → pipe_write */
+  if (f->file_type == FD_PIPE_WRITE) {
+    void *kpage = palloc_get_page(0);
+    if (!kpage) do_exit(-1);
 
-    /* 🔹 파이프의 write end일 경우: pipe_write 호출 */
-    if (f->file_type == FD_PIPE_WRITE) {
-      return pipe_write(f->pipe, u_buf, size);
-    }
-    /* 🔹 파이프의 read end로 write 요청하면 -1 */
-    if (f->file_type == FD_PIPE_READ) {
-      return -1;
-    }
-
-    kpage = palloc_get_page(0);
-    if (kpage == NULL) do_exit(-1);
-
-    lock_acquire(&filesys_lock);
-    remain = size;
+    unsigned remain = size;
+    int total = 0;
     while (remain > 0) {
-      chunk = remain > PGSIZE ? PGSIZE : remain;
+      size_t chunk = remain > PGSIZE ? PGSIZE : remain;
       copy_in(kpage, (const uint8_t*)u_buf + total, chunk);
-      n = file_write(f, kpage, (off_t)chunk);
+      int n = pipe_write(f->pipe, kpage, chunk);
+      if (n < 0) {                       /* reader 없음 */
+        total = -1;
+        break;
+      }
+      total += n;
+      remain -= (unsigned)n;
+      if ((size_t)n < chunk) break;      /* 버퍼가 가득 차 잠시 못씀 */
+    }
+    palloc_free_page(kpage);
+    return total;
+  }
+
+  /* 🔹 파이프 READ로 write 요청 → 에러 */
+  if (f->file_type == FD_PIPE_READ)
+    return -1;
+
+  /* 일반 파일 경로: 기존 로직 (copy_in → file_write) */
+  {
+    void *kpage = palloc_get_page(0);
+    if (!kpage) do_exit(-1);
+
+    unsigned remain = size;
+    int total = 0;
+    lock_acquire(&filesys_lock);
+    while (remain > 0) {
+      size_t chunk = remain > PGSIZE ? PGSIZE : remain;
+      copy_in(kpage, (const uint8_t*)u_buf + total, chunk);
+      int n = file_write(f, kpage, (off_t)chunk);
       if (n <= 0) { total = (n < 0 ? -1 : total); break; }
       total += n;
       remain -= (unsigned)n;
@@ -497,6 +537,8 @@ sys_pipe (int *u_fds)
     fd_close(cur, wfd);
     return -1;
   }
+
+  thread_current()->pending_stdin_fd = rfd;
 
   return 0;
 }

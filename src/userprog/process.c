@@ -17,6 +17,7 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pipe.h"   /* ★ 파이프 포인터/참조 관리에 필요 */
 
 /* 추가: 부모-자식 동기화/리스트 관리에 필요 */
 #include "threads/synch.h"
@@ -43,13 +44,22 @@ find_child_desc (struct thread *parent, tid_t child_tid)
   return NULL;
 }
 
-/* exec 로딩 동기화용 패키지(부모->자식 전달) */
+/* exec 로딩 동기화용 패키지(부모<->자식 공유) */
 struct exec_sync
 {
-  char *cmdline;             /* palloc 페이지에 복사된 전체 커맨드 라인 */
+  /* cmdline은 더 이상 쓰지 않아도 되지만, 호환을 위해 유지하려면 NULL로 두어도 됩니다. */
+  char *cmdline;             /* (옵션) 전체 커맨드 라인 (자식에서 사용 안해도 됨) */
   struct thread *parent;     /* 부모 스레드 포인터 */
   struct semaphore done;     /* 자식 로딩 완료 신호 */
   bool load_ok;              /* 로딩 성공 여부 */
+  struct pipe *stdin_pipe;   /* ★ 자식 stdin으로 넘길 파이프 (부모가 ref 올림) */
+};
+
+/* 자식 스레드에 넘길 인자 패키지 */
+struct exec_args {
+  char *file_name;           /* palloc 페이지에 복사된 전체 커맨드 라인 (자식이 free) */
+  struct pipe *stdin_pipe;   /* 자식 stdin 파이프 (NULL이면 콘솔) */
+  struct exec_sync *es;      /* 동기화 핸들(부모가 sema_down/up에 사용) */
 };
 
 /* ----------- 기존 주석 유지 ----------- */
@@ -61,10 +71,6 @@ struct exec_sync
 tid_t
 process_execute (const char *file_name) 
 {
-  /* 변경 요약:
-     - 로딩 완료까지 부모가 기다리도록 exec_sync 사용
-     - 부모의 children 리스트에 child_desc 등록
-     - 프로그램 이름 분리를 위해 임시 버퍼는 사용 후 해제 */
   char *fn_copy;
   char *tmp;
   tid_t tid;
@@ -97,15 +103,49 @@ process_execute (const char *file_name)
       palloc_free_page (tmp);
       return TID_ERROR;
     }
-  es->cmdline = fn_copy;                 /* 자식이 사용할 커맨드 복사본 */
+  es->cmdline = NULL;                  /* 옵션: 사용 안 함 */
   es->parent  = thread_current ();
   sema_init (&es->done, 0);
   es->load_ok = false;
+  es->stdin_pipe = NULL;               /* ★ 기본값 */
 
-  /* Create a new thread to execute FILE_NAME. (스레드 이름은 prog로) */
-  tid = thread_create (prog, PRI_DEFAULT, start_process, es);
+  /* 자식에게 넘길 exec_args 준비 */
+  struct exec_args *args = malloc (sizeof *args);
+  if (args == NULL)
+    {
+      palloc_free_page (fn_copy);
+      palloc_free_page (tmp);
+      free (es);
+      return TID_ERROR;
+    }
+  args->file_name  = fn_copy;          /* 자식이 free */
+  args->stdin_pipe = NULL;             /* 기본값 */
+  args->es         = es;
+
+  /* ★ 부모가 직전에 만든 파이프 read-end를 자식 stdin으로 넘길지 결정 */
+  {
+    struct thread *cur = thread_current();
+    int pfd = cur->pending_stdin_fd;          /* sys_pipe에서 rfd를 여기에 저장해야 함 */
+    if (pfd >= 0 && pfd < MAX_FD)
+      {
+        struct file *rf = cur->fd_table[pfd];
+        if (rf && rf->file_type == FD_PIPE_READ && rf->pipe)
+          {
+            args->stdin_pipe = rf->pipe;
+            es->stdin_pipe   = rf->pipe;      /* 부모도 알아야 fail시 롤백 가능 */
+            pipe_ref_read_open (rf->pipe);    /* ★ readers++ : 자식 몫 확보 */
+            cur->pending_stdin_fd = -1;       /* 소비 완료 */
+          }
+      }
+  }
+
+  /* 스레드 생성: exec_args를 넘긴다 */
+  tid = thread_create (prog, PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
     {
+      if (args->stdin_pipe)            /* readers++ 했으면 롤백 */
+        pipe_ref_read_close (args->stdin_pipe);
+      free (args);
       palloc_free_page (fn_copy);
       palloc_free_page (tmp);
       free (es);
@@ -118,8 +158,12 @@ process_execute (const char *file_name)
     {
       /* 메모리 부족이어도 자식 로딩 완료까지는 기다려서 일관성 유지 */
       sema_down (&es->done);
+      /* 로딩 실패면 stdin 파이프 ref 되돌리기 */
+      if (!es->load_ok && es->stdin_pipe)
+        pipe_ref_read_close (es->stdin_pipe);
       palloc_free_page (tmp);
       free (es);
+      /* args는 자식이 free (성공/실패 모두) */
       return TID_ERROR;
     }
   cd->tid = tid;
@@ -133,25 +177,28 @@ process_execute (const char *file_name)
   sema_down (&es->done);
   if (!es->load_ok)
     {
-      /* 로딩 실패 */
+      /* 로딩 실패: 우리가 올려둔 파이프 참조를 내림 */
+      if (es->stdin_pipe)
+        pipe_ref_read_close (es->stdin_pipe);
       palloc_free_page (tmp);
       free (es);
+      /* args는 자식이 종료 경로에서 free */
       return TID_ERROR;
     }
 
   /* 임시 버퍼/패키지 정리 */
   palloc_free_page (tmp);
-  free (es);
+  free (es);    /* args는 자식이 free */
   return tid;
 }
 
 /* A thread function that loads a user process and starts it running. */
 static void
-start_process (void *es_)
+start_process (void *args_)
 {
-  /* 변경: 인자로 exec_sync* 를 받는다 */
-  struct exec_sync *es = (struct exec_sync *) es_;
-  char *file_name = es->cmdline;     /* 부모가 넘겨준 커맨드 라인 */
+  struct exec_args *args = (struct exec_args *) args_;
+  struct exec_sync *es   = args->es;
+  char *file_name        = args->file_name;   /* 부모가 넘겨준 커맨드 라인 */
   struct intr_frame if_;
   bool success;
   char *ptr;
@@ -159,15 +206,17 @@ start_process (void *es_)
   int arg_cnt;
   char *arg_list[32];
 
+  /* 자식 stdin 파이프 설정 (NULL이면 콘솔 stdin) */
+  thread_current()->stdin_pipe = args->stdin_pipe;
+
   /* 현재 스레드의 부모 포인터 설정 */
   thread_current ()->parent = es->parent;
 
   arg_cnt = 0;
-  for (arg = strtok_r (file_name, " ", &ptr); arg != NULL; arg = strtok_r (NULL, " ", &ptr))
-    {
-      if (arg_cnt < 32)
-        arg_list[arg_cnt++] = arg;
-    }
+  for (arg = strtok_r (file_name, " ", &ptr);
+       arg != NULL && arg_cnt < 32;
+       arg = strtok_r (NULL, " ", &ptr))
+    arg_list[arg_cnt++] = arg;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -183,8 +232,9 @@ start_process (void *es_)
 
   if (!success)
     {
-      /* 커맨드 버퍼는 부모가 가진 페이지이지만, 관례상 여기서도 안전하게 free */
+      /* 커맨드 버퍼 정리 + args 정리 후 종료 */
       palloc_free_page (file_name);
+      free (args);
       thread_exit ();
       NOT_REACHED ();
     }
@@ -192,12 +242,9 @@ start_process (void *es_)
   /* 인자 스택 구축 */
   argument_stack (arg_list, arg_cnt, &if_);
 
-  /* 커맨드 버퍼 해제 */
+  /* 커맨드 버퍼/args 해제 (성공 경로) */
   palloc_free_page (file_name);
-
-  /* (디버깅용) 스택 덤프 */
-  /* hex_dump ((uintptr_t)if_.esp, (const void *)if_.esp,
-              (size_t)((uintptr_t)PHYS_BASE - (uintptr_t)if_.esp), true); */
+  free (args);
 
   /* intr_exit로 복귀 */
   asm volatile ("movl %0, %%esp; jmp intr_exit"

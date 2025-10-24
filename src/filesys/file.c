@@ -15,6 +15,8 @@ file_open (struct inode *inode)
       file->inode = inode;
       file->pos = 0;
       file->deny_write = false;
+      file->pipe = NULL;
+      file->file_type = FD_REGULAR;      
       return file;
     }
   else

@@ -730,6 +730,9 @@ init_thread (struct thread *t, const char *name, int priority)
   t->next_fd = 2;  /* 0=stdin, 1=stdout 예약 */
   t->exec_file = NULL;
   
+  t->stdin_pipe = NULL;
+  t->pending_stdin_fd = -1;
+
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
   intr_set_level (old_level);
