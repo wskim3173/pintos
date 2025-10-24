@@ -2,6 +2,8 @@
 #define USERPROG_SYSCALL_H
 
 #include <stdbool.h>
+#include "userprog/pipe.h"
+#include "threads/malloc.h"
 
 typedef int pid_t;
 

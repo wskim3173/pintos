@@ -247,11 +247,36 @@ static struct file *fd_get(struct thread *t, int fd) {
   return t->fd_table[fd];
 }
 
+/*
 static void fd_close(struct thread *t, int fd) {
   if (fd >= 2 && fd < MAX_FD && t->fd_table[fd] != NULL) {
     lock_acquire(&filesys_lock);
     file_close(t->fd_table[fd]);
     lock_release(&filesys_lock);
+    t->fd_table[fd] = NULL;
+    if (fd < t->next_fd) t->next_fd = fd;
+  }
+}
+*/
+
+static void fd_close(struct thread *t, int fd) {
+  if (fd >= 2 && fd < MAX_FD && t->fd_table[fd] != NULL) {
+    struct file *f = t->fd_table[fd];
+
+    /* 파이프인지, 일반파일인지 분기 */
+    if (f->file_type == FD_PIPE_READ) {
+      pipe_ref_read_close(f->pipe);   /* reader 감소/해제 */
+      free(f);                        /* pipe_end_as_file()로 malloc 했으므로 free */
+    } else if (f->file_type == FD_PIPE_WRITE) {
+      pipe_ref_write_close(f->pipe);  /* writer 감소/해제 */
+      free(f);                        /* 동일 */
+    } else {
+      /* 일반 파일은 기존처럼 filesys 락으로 보호해서 닫기 */
+      lock_acquire(&filesys_lock);
+      file_close(f);
+      lock_release(&filesys_lock);
+    }
+
     t->fd_table[fd] = NULL;
     if (fd < t->next_fd) t->next_fd = fd;
   }
@@ -289,6 +314,17 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
     struct file *f = fd_get(cur, fd);
     int n;
     if (f == NULL) { palloc_free_page(kpage); return -1; }
+
+    /* 🔹 파이프의 read end일 경우: pipe_read 호출 */
+    if (f->file_type == FD_PIPE_READ) {
+      palloc_free_page(kpage);
+      return pipe_read(f->pipe, u_buf, size);
+    }
+    /* 🔹 파이프의 write end로 read 요청하면 -1 */
+    if (f->file_type == FD_PIPE_WRITE) {
+      palloc_free_page(kpage);
+      return -1;
+    }
 
     lock_acquire(&filesys_lock);
     remain = size;
@@ -330,6 +366,15 @@ static int sys_write(int fd, const void *u_buf, unsigned size) {
 
     if (f == NULL) return -1;
     if (size == 0) return 0;
+
+    /* 🔹 파이프의 write end일 경우: pipe_write 호출 */
+    if (f->file_type == FD_PIPE_WRITE) {
+      return pipe_write(f->pipe, u_buf, size);
+    }
+    /* 🔹 파이프의 read end로 write 요청하면 -1 */
+    if (f->file_type == FD_PIPE_READ) {
+      return -1;
+    }
 
     kpage = palloc_get_page(0);
     if (kpage == NULL) do_exit(-1);
@@ -399,6 +444,63 @@ static unsigned sys_tell(int fd) {
   return p;
 }
 
+static struct file *
+pipe_end_as_file (struct pipe *p, bool is_reader)
+{
+  struct file *f = malloc (sizeof *f);
+  if (!f) return NULL;
+  f->inode = NULL;
+  f->pos = 0;
+  f->deny_write = false;
+  f->pipe = p;
+  f->file_type = is_reader ? FD_PIPE_READ : FD_PIPE_WRITE;
+  return f;
+}
+
+static int
+sys_pipe (int *u_fds)
+{
+  if (!u_fds) return -1;
+
+  struct pipe *p = pipe_create ();
+  if (!p) return -1;
+
+  struct file *fr = pipe_end_as_file (p, true);
+  struct file *fw = pipe_end_as_file (p, false);
+  if (!fr || !fw) {
+    free(fr); free(fw);
+    /* 두 끝 모두 닫으며 파이프 자원 회수 */
+    pipe_ref_read_close(p);
+    pipe_ref_write_close(p);
+    return -1;
+  }
+
+  struct thread *cur = thread_current();
+  int rfd = fd_alloc (cur, fr);
+  int wfd = fd_alloc (cur, fw);
+
+  if (rfd < 0 || wfd < 0) {
+    if (rfd >= 0) fd_close(cur, rfd);  /* 파이프 전용 close 경로로 롤백 */
+    if (wfd >= 0) fd_close(cur, wfd);
+    else { /* fr만 열렸던 경우도 정리 */
+      pipe_ref_read_close(p);
+      free(fr);
+    }
+    return -1;
+  }
+
+  /* 유저 공간으로 fd 쌍 복사 */
+  if (!copy_out (u_fds, &rfd, sizeof rfd) ||
+      !copy_out (u_fds + 1, &wfd, sizeof wfd)) {
+    /* 실패 시 두 FD 닫고 롤백 */
+    fd_close(cur, rfd);
+    fd_close(cur, wfd);
+    return -1;
+  }
+
+  return 0;
+}
+
 /* ---------------- dispatcher ---------------- */
 
 static void syscall_handler (struct intr_frame *f)
@@ -452,9 +554,8 @@ static void syscall_handler (struct intr_frame *f)
     case SYS_SEEK:   { int fd = get_int_arg(u_esp,0); unsigned pos=(unsigned)get_int_arg(u_esp,1); sys_seek(fd,pos); break; }
     case SYS_TELL:   { int fd = get_int_arg(u_esp,0); f->eax = sys_tell(fd); break; }
     case SYS_PIPE: {
-      void *u_fds = (void *) get_ptr_arg(u_esp, 0);
-      // 아직 미구현이면 안전하게 실패 반환
-      f->eax = -1;
+      int *u_fds = (int *) get_ptr_arg(u_esp, 0);
+      f->eax = sys_pipe(u_fds);
       break;
     }
     default:
