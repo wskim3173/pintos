@@ -8,6 +8,7 @@
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
+#include "userprog/pipe.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
@@ -17,18 +18,12 @@
 #include "threads/palloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
-#include "userprog/pipe.h"   /* ★ 파이프 포인터/참조 관리에 필요 */
-
-/* 추가: 부모-자식 동기화/리스트 관리에 필요 */
 #include "threads/synch.h"
 #include "threads/malloc.h"
 
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
 
-/* ----------- 추가: 도우미들 ----------- */
-
-/* 부모의 children 리스트에서 child_tid 찾기 */
 static struct child_desc *
 find_child_desc (struct thread *parent, tid_t child_tid)
 {
@@ -44,25 +39,20 @@ find_child_desc (struct thread *parent, tid_t child_tid)
   return NULL;
 }
 
-/* exec 로딩 동기화용 패키지(부모<->자식 공유) */
 struct exec_sync
 {
-  /* cmdline은 더 이상 쓰지 않아도 되지만, 호환을 위해 유지하려면 NULL로 두어도 됩니다. */
-  char *cmdline;             /* (옵션) 전체 커맨드 라인 (자식에서 사용 안해도 됨) */
-  struct thread *parent;     /* 부모 스레드 포인터 */
-  struct semaphore done;     /* 자식 로딩 완료 신호 */
-  bool load_ok;              /* 로딩 성공 여부 */
-  struct pipe *stdin_pipe;   /* ★ 자식 stdin으로 넘길 파이프 (부모가 ref 올림) */
+  char *cmdline;
+  struct thread *parent;
+  struct semaphore done;
+  bool load_ok;
+  struct pipe *stdin_pipe;
 };
 
-/* 자식 스레드에 넘길 인자 패키지 */
 struct exec_args {
-  char *file_name;           /* palloc 페이지에 복사된 전체 커맨드 라인 (자식이 free) */
-  struct pipe *stdin_pipe;   /* 자식 stdin 파이프 (NULL이면 콘솔) */
-  struct exec_sync *es;      /* 동기화 핸들(부모가 sema_down/up에 사용) */
+  char *file_name;
+  struct pipe *stdin_pipe;
+  struct exec_sync *es;
 };
-
-/* ----------- 기존 주석 유지 ----------- */
 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
@@ -95,7 +85,6 @@ process_execute (const char *file_name)
 
   prog = strtok_r (tmp, " ", &save_ptr);
 
-  /* exec_sync 준비 */
   es = malloc (sizeof *es);
   if (es == NULL)
     {
@@ -103,13 +92,12 @@ process_execute (const char *file_name)
       palloc_free_page (tmp);
       return TID_ERROR;
     }
-  es->cmdline = NULL;                  /* 옵션: 사용 안 함 */
+  es->cmdline = NULL;
   es->parent  = thread_current ();
   sema_init (&es->done, 0);
   es->load_ok = false;
-  es->stdin_pipe = NULL;               /* ★ 기본값 */
+  es->stdin_pipe = NULL;
 
-  /* 자식에게 넘길 exec_args 준비 */
   struct exec_args *args = malloc (sizeof *args);
   if (args == NULL)
     {
@@ -118,32 +106,30 @@ process_execute (const char *file_name)
       free (es);
       return TID_ERROR;
     }
-  args->file_name  = fn_copy;          /* 자식이 free */
-  args->stdin_pipe = NULL;             /* 기본값 */
+  args->file_name  = fn_copy;
+  args->stdin_pipe = NULL;
   args->es         = es;
 
-  /* ★ 부모가 직전에 만든 파이프 read-end를 자식 stdin으로 넘길지 결정 */
   {
     struct thread *cur = thread_current();
-    int pfd = cur->pending_stdin_fd;          /* sys_pipe에서 rfd를 여기에 저장해야 함 */
+    int pfd = cur->pending_stdin_fd;
     if (pfd >= 0 && pfd < MAX_FD)
       {
         struct file *rf = cur->fd_table[pfd];
         if (rf && rf->file_type == FD_PIPE_READ && rf->pipe)
           {
             args->stdin_pipe = rf->pipe;
-            es->stdin_pipe   = rf->pipe;      /* 부모도 알아야 fail시 롤백 가능 */
-            pipe_ref_read_open (rf->pipe);    /* ★ readers++ : 자식 몫 확보 */
-            cur->pending_stdin_fd = -1;       /* 소비 완료 */
+            es->stdin_pipe   = rf->pipe;
+            pipe_ref_read_open (rf->pipe);
+            cur->pending_stdin_fd = -1;
           }
       }
   }
 
-  /* 스레드 생성: exec_args를 넘긴다 */
   tid = thread_create (prog, PRI_DEFAULT, start_process, args);
   if (tid == TID_ERROR)
     {
-      if (args->stdin_pipe)            /* readers++ 했으면 롤백 */
+      if (args->stdin_pipe)
         pipe_ref_read_close (args->stdin_pipe);
       free (args);
       palloc_free_page (fn_copy);
@@ -152,18 +138,14 @@ process_execute (const char *file_name)
       return TID_ERROR;
     }
 
-  /* 부모에 child_desc 등록 (wait 용) */
   cd = malloc (sizeof *cd);
   if (cd == NULL)
     {
-      /* 메모리 부족이어도 자식 로딩 완료까지는 기다려서 일관성 유지 */
       sema_down (&es->done);
-      /* 로딩 실패면 stdin 파이프 ref 되돌리기 */
       if (!es->load_ok && es->stdin_pipe)
         pipe_ref_read_close (es->stdin_pipe);
       palloc_free_page (tmp);
       free (es);
-      /* args는 자식이 free (성공/실패 모두) */
       return TID_ERROR;
     }
   cd->tid = tid;
@@ -173,22 +155,18 @@ process_execute (const char *file_name)
   sema_init (&cd->sema, 0);
   list_push_back (&thread_current ()->children, &cd->elem);
 
-  /* 자식 로딩 완료까지 대기 */
   sema_down (&es->done);
   if (!es->load_ok)
     {
-      /* 로딩 실패: 우리가 올려둔 파이프 참조를 내림 */
       if (es->stdin_pipe)
         pipe_ref_read_close (es->stdin_pipe);
       palloc_free_page (tmp);
       free (es);
-      /* args는 자식이 종료 경로에서 free */
       return TID_ERROR;
     }
 
-  /* 임시 버퍼/패키지 정리 */
   palloc_free_page (tmp);
-  free (es);    /* args는 자식이 free */
+  free (es);
   return tid;
 }
 
@@ -198,7 +176,7 @@ start_process (void *args_)
 {
   struct exec_args *args = (struct exec_args *) args_;
   struct exec_sync *es   = args->es;
-  char *file_name        = args->file_name;   /* 부모가 넘겨준 커맨드 라인 */
+  char *file_name        = args->file_name;
   struct intr_frame if_;
   bool success;
   char *ptr;
@@ -206,10 +184,7 @@ start_process (void *args_)
   int arg_cnt;
   char *arg_list[32];
 
-  /* 자식 stdin 파이프 설정 (NULL이면 콘솔 stdin) */
   thread_current()->stdin_pipe = args->stdin_pipe;
-
-  /* 현재 스레드의 부모 포인터 설정 */
   thread_current ()->parent = es->parent;
 
   arg_cnt = 0;
@@ -226,27 +201,22 @@ start_process (void *args_)
 
   success = load (file_name, &if_.eip, &if_.esp);
 
-  /* 부모에게 로딩 결과 알림 (세마 up) */
   es->load_ok = success;
   sema_up (&es->done);
 
   if (!success)
     {
-      /* 커맨드 버퍼 정리 + args 정리 후 종료 */
       palloc_free_page (file_name);
       free (args);
       thread_exit ();
       NOT_REACHED ();
     }
 
-  /* 인자 스택 구축 */
   argument_stack (arg_list, arg_cnt, &if_);
 
-  /* 커맨드 버퍼/args 해제 (성공 경로) */
   palloc_free_page (file_name);
   free (args);
 
-  /* intr_exit로 복귀 */
   asm volatile ("movl %0, %%esp; jmp intr_exit"
                 :
                 : "g" (&if_)
@@ -254,7 +224,6 @@ start_process (void *args_)
   NOT_REACHED ();
 }
 
-/* 인자 스택 구축 (네 코드 그대로 사용) */
 void
 argument_stack (char **argv, int argc, struct intr_frame *if_)
 {
@@ -317,17 +286,16 @@ process_wait (tid_t child_tid)
   cur = thread_current ();
   cd = find_child_desc (cur, child_tid);
   if (cd == NULL)
-    return -1;               /* 직계 자식 아님 */
+    return -1; 
   if (cd->waited)
-    return -1;               /* 이미 wait 했음 */
+    return -1;
   cd->waited = true;
 
   if (!cd->exited)
-    sema_down (&cd->sema);   /* 자식 종료 대기 */
+    sema_down (&cd->sema);
 
   status = cd->exit_status;
 
-  /* 디스크립터 회수 */
   list_remove (&cd->elem);
   free (cd);
 
@@ -351,14 +319,12 @@ process_exit (void)
     }
   }  
 
-  /* 실행 파일 쓰기 금지 해제 및 닫기 */
   if (cur->exec_file != NULL) {
     file_allow_write(cur->exec_file);
     file_close(cur->exec_file);
     cur->exec_file = NULL;
   }
 
-  /* 부모에게 종료 상태 전달 + 깨우기 */
   if (cur->parent != NULL)
     {
       struct child_desc *cd = find_child_desc (cur->parent, cur->tid);
@@ -389,7 +355,6 @@ process_activate (void)
   tss_update ();
 }
 
-/* ---- ELF 로더 코드(기존 유지) ---- */
 
 typedef uint32_t Elf32_Word, Elf32_Addr, Elf32_Off;
 typedef uint16_t Elf32_Half;
@@ -448,7 +413,6 @@ static bool load_segment (struct file *file, off_t ofs, uint8_t *upage,
                           uint32_t read_bytes, uint32_t zero_bytes,
                           bool writable);
 
-/* Loads an ELF executable … (기존 구현 유지) */
 bool
 load (const char *file_name, void (**eip) (void), void **esp) 
 {
@@ -548,7 +512,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 
  done:
   if (!success && file != NULL) {
-    /* 실패 시에만 닫기 */
     file_close(file);
     t->exec_file = NULL;
   }

@@ -111,14 +111,14 @@ struct thread
     struct list_elem allelem;           /* List element for all threads list. */
 
    struct thread *parent;
-   struct list children;      /* child_desc 리스트 */
+   struct list children;
    int exit_status;
    struct file *fd_table[MAX_FD];
-   int next_fd;               /* 다음 할당 시작 지점 (>=2) */   
+   int next_fd;   
    struct file *exec_file;
 
-   struct pipe *stdin_pipe;   // NULL이면 콘솔, 비NULL이면 파이프에서 읽기
-   int pending_stdin_fd;      // 다음 exec에서 stdin으로 넘길 fd (부모 쪽 임시 저장), 기본 -1
+   struct pipe *stdin_pipe;
+   int pending_stdin_fd;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */

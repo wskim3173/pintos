@@ -4,75 +4,100 @@
 #include <string.h>
 
 struct pipe *
-pipe_create (void)
+pipe_create(void)
 {
-    struct pipe *p = malloc (sizeof *p);
-    if (!p) return NULL;
-    p->head = p->tail = p->count = 0;
-    p->readers = 1; /* one read end */
-    p->writers = 1; /* one write end */
-    lock_init (&p->lk);
-    cond_init (&p->can_read);
-    cond_init (&p->can_write);
-    p->closed_r = false;
-    p->closed_w = false;
-    return p;
-}
-
-
-void pipe_ref_read_open (struct pipe *p) { lock_acquire(&p->lk); p->readers++; lock_release(&p->lk);}
-void pipe_ref_write_open(struct pipe *p) { lock_acquire(&p->lk); p->writers++; lock_release(&p->lk);}
-
-
-void
-pipe_destroy_if_unreferenced (struct pipe *p)
-{
-if (!p) return;
-if (p->readers == 0 && p->writers == 0)
-free (p);
+  struct pipe *p = malloc(sizeof *p);
+  if (!p)
+    return NULL;
+  p->head = p->tail = p->count = 0;
+  p->readers = 1; /* one read end */
+  p->writers = 1; /* one write end */
+  lock_init(&p->lk);
+  cond_init(&p->can_read);
+  cond_init(&p->can_write);
+  p->closed_r = false;
+  p->closed_w = false;
+  return p;
 }
 
 void
-pipe_ref_read_close (struct pipe *p)
+pipe_ref_read_open(struct pipe *p)
 {
-  lock_acquire (&p->lk);
-  if (p->readers > 0) p->readers--;
-  if (p->readers == 0) {
+  lock_acquire(&p->lk);
+  p->readers++;
+  lock_release(&p->lk);
+}
+
+void
+pipe_ref_write_open(struct pipe *p)
+{
+  lock_acquire(&p->lk);
+  p->writers++;
+  lock_release(&p->lk);
+}
+
+void
+pipe_destroy_if_unreferenced(struct pipe *p)
+{
+  if (!p)
+    return;
+  if (p->readers == 0 && p->writers == 0)
+    free(p);
+}
+
+void
+pipe_ref_read_close(struct pipe *p)
+{
+  lock_acquire(&p->lk);
+  if (p->readers > 0)
+    p->readers--;
+  if (p->readers == 0)
+  {
     p->closed_r = true;
-    /* writer가 가득찬 버퍼에서 대기 중일 수 있음 → 깨워주기 */
-    cond_broadcast (&p->can_write, &p->lk);
+    cond_broadcast(&p->can_write, &p->lk);
   }
-  lock_release (&p->lk);
-  pipe_destroy_if_unreferenced (p);
+  lock_release(&p->lk);
+  pipe_destroy_if_unreferenced(p);
 }
 
 void
-pipe_ref_write_close (struct pipe *p)
+pipe_ref_write_close(struct pipe *p)
 {
-  lock_acquire (&p->lk);
-  if (p->writers > 0) p->writers--;
-  if (p->writers == 0) {
+  lock_acquire(&p->lk);
+  if (p->writers > 0)
+    p->writers--;
+  if (p->writers == 0)
+  {
     p->closed_w = true;
-    /* reader가 빈 버퍼에서 대기 중일 수 있음 → EOF 통지 위해 깨우기 */
-    cond_broadcast (&p->can_read, &p->lk);
+    cond_broadcast(&p->can_read, &p->lk);
   }
-  lock_release (&p->lk);
-  pipe_destroy_if_unreferenced (p);
+  lock_release(&p->lk);
+  pipe_destroy_if_unreferenced(p);
 }
 
-/* writer: size 바이트 전부 써야 성공 (blocking) */
 int
-pipe_write (struct pipe *p, const void *ubuf, unsigned size)
+pipe_write(struct pipe *p, const void *ubuf, unsigned size)
 {
-  if (size == 0) return 0;
-  lock_acquire (&p->lk);
-  if (p->readers == 0) { lock_release(&p->lk); return -1; }
+  if (size == 0)
+    return 0;
+  lock_acquire(&p->lk);
+  if (p->readers == 0)
+  {
+    lock_release(&p->lk);
+    return -1;
+  }
 
   unsigned written = 0;
-  while (written < size) {
-    while (p->count == PIPE_BUFSZ) {
-      if (p->readers == 0) { lock_release(&p->lk); return -1; }
-      cond_wait (&p->can_write, &p->lk);
+  while (written < size)
+  {
+    while (p->count == PIPE_BUFSZ)
+    {
+      if (p->readers == 0)
+      {
+        lock_release(&p->lk);
+        return -1;
+      }
+      cond_wait(&p->can_write, &p->lk);
     }
 
     size_t space = PIPE_BUFSZ - p->count;
@@ -80,55 +105,68 @@ pipe_write (struct pipe *p, const void *ubuf, unsigned size)
 
     size_t first = chunk;
     size_t endcap = PIPE_BUFSZ - (p->head % PIPE_BUFSZ);
-    if (first > endcap) first = endcap;
+    if (first > endcap)
+      first = endcap;
 
-    memcpy(&p->buf[p->head % PIPE_BUFSZ], (const uint8_t*)ubuf + written, first);
-    p->head += first; p->count += first; written += first;
+    memcpy(&p->buf[p->head % PIPE_BUFSZ], (const uint8_t *)ubuf + written, first);
+    p->head += first;
+    p->count += first;
+    written += first;
 
     size_t remain = chunk - first;
-    if (remain) {
-      memcpy(&p->buf[p->head % PIPE_BUFSZ], (const uint8_t*)ubuf + written, remain);
-      p->head += remain; p->count += remain; written += remain;
+    if (remain)
+    {
+      memcpy(&p->buf[p->head % PIPE_BUFSZ], (const uint8_t *)ubuf + written, remain);
+      p->head += remain;
+      p->count += remain;
+      written += remain;
     }
 
-    /* reader 하나 깨우기 → 반드시 락 보유 중에 lock 인자 전달 */
-    cond_signal (&p->can_read, &p->lk);
+    cond_signal(&p->can_read, &p->lk);
   }
 
-  lock_release (&p->lk);
+  lock_release(&p->lk);
   return (int)size;
 }
 
-/* reader: 데이터가 생길 때까지 대기; 가능만큼 읽고 반환. writers==0 && empty → 0(EOF) */
 int
-pipe_read (struct pipe *p, void *ubuf, unsigned size)
+pipe_read(struct pipe *p, void *ubuf, unsigned size)
 {
-  if (size == 0) return 0;
-  lock_acquire (&p->lk);
+  if (size == 0)
+    return 0;
+  lock_acquire(&p->lk);
 
-  while (p->count == 0) {
-    if (p->writers == 0) { lock_release(&p->lk); return 0; } /* EOF */
-    cond_wait (&p->can_read, &p->lk);
+  while (p->count == 0)
+  {
+    if (p->writers == 0)
+    {
+      lock_release(&p->lk);
+      return 0;
+    } /* EOF */
+    cond_wait(&p->can_read, &p->lk);
   }
 
   size_t to_read = p->count < (size_t)size ? p->count : (size_t)size;
 
   size_t first = to_read;
   size_t endcap = PIPE_BUFSZ - (p->tail % PIPE_BUFSZ);
-  if (first > endcap) first = endcap;
+  if (first > endcap)
+    first = endcap;
 
-  memcpy((uint8_t*)ubuf, &p->buf[p->tail % PIPE_BUFSZ], first);
-  p->tail += first; p->count -= first;
+  memcpy((uint8_t *)ubuf, &p->buf[p->tail % PIPE_BUFSZ], first);
+  p->tail += first;
+  p->count -= first;
 
   size_t remain = to_read - first;
-  if (remain) {
-    memcpy((uint8_t*)ubuf + first, &p->buf[p->tail % PIPE_BUFSZ], remain);
-    p->tail += remain; p->count -= remain;
+  if (remain)
+  {
+    memcpy((uint8_t *)ubuf + first, &p->buf[p->tail % PIPE_BUFSZ], remain);
+    p->tail += remain;
+    p->count -= remain;
   }
 
-  /* writer 하나 깨우기 */
-  cond_signal (&p->can_write, &p->lk);
+  cond_signal(&p->can_write, &p->lk);
 
-  lock_release (&p->lk);
+  lock_release(&p->lk);
   return (int)to_read;
 }

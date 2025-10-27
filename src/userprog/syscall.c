@@ -41,7 +41,6 @@ put_user (uint8_t *udst, uint8_t byte)
 
 static void NO_RETURN do_exit(int status);
 
-/* 한 바이트라도 접근 가능한지 및 유저영역인지 확인 */
 static void
 check_address (const void *addr)
 {
@@ -49,7 +48,6 @@ check_address (const void *addr)
     do_exit(-1);
 }
 
-/* 유저 메모리에서 커널 버퍼로 안전 복사 (바이트 단위, 페이지 경계 안전) */
 static void
 copy_in (void *dst, const void *usrc, size_t n)
 {
@@ -69,8 +67,6 @@ copy_in (void *dst, const void *usrc, size_t n)
   }
 }
 
-/* 커널 버퍼 SRC의 데이터를 유저 주소 UDEST로 안전하게 복사한다.
-   성공하면 true, 중간에 segfault 나면 false. */
 static bool
 copy_out (void *udst, const void *src, size_t n)
 {
@@ -82,11 +78,9 @@ copy_out (void *udst, const void *src, size_t n)
   ks = (const uint8_t *)src;
 
   for (i = 0; i < n; i++) {
-    /* 유저 주소인지 확인 (PHYS_BASE 아래) */
     if (up == NULL || !is_user_vaddr(up))
       return false;
 
-    /* 바이트 단위로 기록 시도: 실패하면 segfault로 간주 */
     if (!put_user(up, ks[i]))
       return false;
 
@@ -95,7 +89,6 @@ copy_out (void *udst, const void *src, size_t n)
   return true;
 }
 
-/* 널 종료 문자열을 유저공간에서 커널 페이지 버퍼로 복사, 반환: palloc 페이지(호출자가 free) */
 #define MAX_STR_LEN PGSIZE
 static char *
 copy_in_string (const char *u_str)
@@ -169,11 +162,10 @@ do_exit (int status)
   NOT_REACHED();
 }
 
-/* 주의: 커널은 유저용 exec() 래퍼를 부르지 않는다. process_execute 사용 */
 static pid_t
 do_exec (const char *u_file)
 {
-  char *kfile = copy_in_string(u_file);         /* 유저 문자열을 커널 버퍼로 */
+  char *kfile = copy_in_string(u_file);
   pid_t pid = process_execute(kfile);
   palloc_free_page(kfile);
   return pid;
@@ -194,7 +186,6 @@ sys_create (const char *u_name, unsigned initial_size)
   return ok;
 }
 
-/* 표준 C의 remove()와 충돌 피하기 위해 이름 변경 */
 static bool
 sys_remove (const char *u_name)
 {
@@ -220,8 +211,8 @@ write_stdout (const void *u_buf, unsigned size)
   remain = size;
   while (remain > 0) {
     chunk = remain > PGSIZE ? PGSIZE : remain;
-    copy_in(kpage, up, chunk);          // 유저→커널 안전 복사
-    putbuf((const char *)kpage, chunk); // 콘솔로 출력
+    copy_in(kpage, up, chunk);
+    putbuf((const char *)kpage, chunk);
     up += chunk;
     remain -= (unsigned)chunk;
   }
@@ -229,7 +220,6 @@ write_stdout (const void *u_buf, unsigned size)
   return (int)size;
 }
 
-/* fd 할당: 비어있는 슬롯 찾기 */
 static int fd_alloc(struct thread *t, struct file *f) {
   int i = t->next_fd, start = t->next_fd;
   if (f == NULL) return -1;
@@ -241,37 +231,22 @@ static int fd_alloc(struct thread *t, struct file *f) {
   }
 }
 
-/* fd 유효성 체크 */
 static struct file *fd_get(struct thread *t, int fd) {
   if (fd < 2 || fd >= MAX_FD) return NULL;
   return t->fd_table[fd];
 }
 
-/*
-static void fd_close(struct thread *t, int fd) {
-  if (fd >= 2 && fd < MAX_FD && t->fd_table[fd] != NULL) {
-    lock_acquire(&filesys_lock);
-    file_close(t->fd_table[fd]);
-    lock_release(&filesys_lock);
-    t->fd_table[fd] = NULL;
-    if (fd < t->next_fd) t->next_fd = fd;
-  }
-}
-*/
-
 static void fd_close(struct thread *t, int fd) {
   if (fd >= 2 && fd < MAX_FD && t->fd_table[fd] != NULL) {
     struct file *f = t->fd_table[fd];
 
-    /* 파이프인지, 일반파일인지 분기 */
     if (f->file_type == FD_PIPE_READ) {
-      pipe_ref_read_close(f->pipe);   /* reader 감소/해제 */
-      free(f);                        /* pipe_end_as_file()로 malloc 했으므로 free */
+      pipe_ref_read_close(f->pipe);
+      free(f);
     } else if (f->file_type == FD_PIPE_WRITE) {
-      pipe_ref_write_close(f->pipe);  /* writer 감소/해제 */
-      free(f);                        /* 동일 */
+      pipe_ref_write_close(f->pipe);
+      free(f);
     } else {
-      /* 일반 파일은 기존처럼 filesys 락으로 보호해서 닫기 */
       lock_acquire(&filesys_lock);
       file_close(f);
       lock_release(&filesys_lock);
@@ -285,12 +260,10 @@ static void fd_close(struct thread *t, int fd) {
 static int sys_read(int fd, void *u_buf, unsigned size) {
   struct thread *cur = thread_current();
   if (size == 0) return 0;
-  if (fd == 1) return -1;  /* stdout에서 read 불가 */
+  if (fd == 1) return -1;
 
-  // 🔹 stdin 리다이렉션: 파이프가 붙어 있으면 파이프에서 읽기
   if (fd == 0) {
     if (cur->stdin_pipe) {
-      // kpage 중계 (copy_out)
       void *kpage = palloc_get_page(0);
       if (!kpage) do_exit(-1);
 
@@ -298,7 +271,7 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
       while (remain > 0) {
         size_t chunk = remain > PGSIZE ? PGSIZE : remain;
         int n = pipe_read(cur->stdin_pipe, kpage, chunk);
-        if (n <= 0) break; // EOF or no data
+        if (n <= 0) break;
         if (!copy_out((uint8_t*)u_buf + total, kpage, (size_t)n)) {
           palloc_free_page(kpage); do_exit(-1);
         }
@@ -308,7 +281,6 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
       palloc_free_page(kpage);
       return total;
     } else {
-      // 기존 콘솔 입력 경로
       unsigned remain = size; int total = 0;
       while (remain--) {
         uint8_t c = input_getc();
@@ -322,7 +294,6 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
   struct file *f = fd_get(cur, fd);
   if (!f) return -1;
 
-  /* 🔹 파이프 READ: pipe_read → kpage → copy_out */
   if (f->file_type == FD_PIPE_READ) {
     void *kpage = palloc_get_page(0);
     if (!kpage) do_exit(-1);
@@ -332,24 +303,22 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
     while (remain > 0) {
       size_t chunk = remain > PGSIZE ? PGSIZE : remain;
       int n = pipe_read(f->pipe, kpage, chunk);
-      if (n <= 0) break;                 /* 0=EOF */
+      if (n <= 0) break;
       if (!copy_out((uint8_t*)u_buf + total, kpage, (size_t)n)) {
         palloc_free_page(kpage);
         do_exit(-1);
       }
       total += n;
       remain -= (unsigned)n;
-      if ((size_t)n < chunk) break;      /* 파이프에 더 없음 */
+      if ((size_t)n < chunk) break;
     }
     palloc_free_page(kpage);
     return total;
   }
 
-  /* 🔹 파이프 WRITE로 read 요청 → 에러 */
   if (f->file_type == FD_PIPE_WRITE)
     return -1;
 
-  /* 일반 파일 경로: 기존 로직 (kpage로 받아 copy_out) */
   {
     void *kpage = palloc_get_page(0);
     if (!kpage) do_exit(-1);
@@ -379,14 +348,13 @@ static int sys_read(int fd, void *u_buf, unsigned size) {
 
 static int sys_write(int fd, const void *u_buf, unsigned size) {
   struct thread *cur = thread_current();
-  if (fd == 0) return -1;               /* stdin에 write 불가 */
+  if (fd == 0) return -1; 
   if (size == 0) return 0;
   if (fd == 1) return write_stdout(u_buf, size);
 
   struct file *f = fd_get(cur, fd);
   if (!f) return -1;
 
-  /* 🔹 파이프 WRITE: copy_in → pipe_write */
   if (f->file_type == FD_PIPE_WRITE) {
     void *kpage = palloc_get_page(0);
     if (!kpage) do_exit(-1);
@@ -397,23 +365,21 @@ static int sys_write(int fd, const void *u_buf, unsigned size) {
       size_t chunk = remain > PGSIZE ? PGSIZE : remain;
       copy_in(kpage, (const uint8_t*)u_buf + total, chunk);
       int n = pipe_write(f->pipe, kpage, chunk);
-      if (n < 0) {                       /* reader 없음 */
+      if (n < 0) {
         total = -1;
         break;
       }
       total += n;
       remain -= (unsigned)n;
-      if ((size_t)n < chunk) break;      /* 버퍼가 가득 차 잠시 못씀 */
+      if ((size_t)n < chunk) break;
     }
     palloc_free_page(kpage);
     return total;
   }
 
-  /* 🔹 파이프 READ로 write 요청 → 에러 */
   if (f->file_type == FD_PIPE_READ)
     return -1;
 
-  /* 일반 파일 경로: 기존 로직 (copy_in → file_write) */
   {
     void *kpage = palloc_get_page(0);
     if (!kpage) do_exit(-1);
@@ -509,7 +475,6 @@ sys_pipe (int *u_fds)
   struct file *fw = pipe_end_as_file (p, false);
   if (!fr || !fw) {
     free(fr); free(fw);
-    /* 두 끝 모두 닫으며 파이프 자원 회수 */
     pipe_ref_read_close(p);
     pipe_ref_write_close(p);
     return -1;
@@ -520,19 +485,17 @@ sys_pipe (int *u_fds)
   int wfd = fd_alloc (cur, fw);
 
   if (rfd < 0 || wfd < 0) {
-    if (rfd >= 0) fd_close(cur, rfd);  /* 파이프 전용 close 경로로 롤백 */
+    if (rfd >= 0) fd_close(cur, rfd);
     if (wfd >= 0) fd_close(cur, wfd);
-    else { /* fr만 열렸던 경우도 정리 */
+    else {
       pipe_ref_read_close(p);
       free(fr);
     }
     return -1;
   }
 
-  /* 유저 공간으로 fd 쌍 복사 */
   if (!copy_out (u_fds, &rfd, sizeof rfd) ||
       !copy_out (u_fds + 1, &wfd, sizeof wfd)) {
-    /* 실패 시 두 FD 닫고 롤백 */
     fd_close(cur, rfd);
     fd_close(cur, wfd);
     return -1;
@@ -548,7 +511,7 @@ sys_pipe (int *u_fds)
 static void syscall_handler (struct intr_frame *f)
 {
   void *u_esp = f->esp;
-  check_address(u_esp);               /* sysno 읽기 전 스택 검증 */
+  check_address(u_esp);
 
   int sysno = get_sysno(u_esp);
 
@@ -587,16 +550,56 @@ static void syscall_handler (struct intr_frame *f)
       break;
     }
 
-    /* 파일 관련 나머지(read/write/open/close...)는 이후 단계에서 채움 */
-    case SYS_OPEN:   { const char *n = (const char*)get_ptr_arg(u_esp,0); f->eax = sys_open(n); break; }
-    case SYS_CLOSE:  { int fd = get_int_arg(u_esp,0); sys_close(fd); break; }
-    case SYS_READ:   { int fd = get_int_arg(u_esp,0); void*buf=(void*)get_ptr_arg(u_esp,1); unsigned sz=(unsigned)get_int_arg(u_esp,2); f->eax = sys_read(fd,buf,sz); break; }
-    case SYS_WRITE:  { int fd = get_int_arg(u_esp,0); const void*buf=(const void*)get_ptr_arg(u_esp,1); unsigned sz=(unsigned)get_int_arg(u_esp,2); f->eax = sys_write(fd,buf,sz); break; }
-    case SYS_FILESIZE:{ int fd = get_int_arg(u_esp,0); f->eax = sys_filesize(fd); break; }
-    case SYS_SEEK:   { int fd = get_int_arg(u_esp,0); unsigned pos=(unsigned)get_int_arg(u_esp,1); sys_seek(fd,pos); break; }
-    case SYS_TELL:   { int fd = get_int_arg(u_esp,0); f->eax = sys_tell(fd); break; }
-    case SYS_PIPE: {
-      int *u_fds = (int *) get_ptr_arg(u_esp, 0);
+    case SYS_OPEN:
+    {
+      const char *n = (const char *)get_ptr_arg(u_esp, 0);
+      f->eax = sys_open(n);
+      break;
+    }
+    case SYS_CLOSE:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      sys_close(fd);
+      break;
+    }
+    case SYS_READ:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      void *buf = (void *)get_ptr_arg(u_esp, 1);
+      unsigned sz = (unsigned)get_int_arg(u_esp, 2);
+      f->eax = sys_read(fd, buf, sz);
+      break;
+    }
+    case SYS_WRITE:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      const void *buf = (const void *)get_ptr_arg(u_esp, 1);
+      unsigned sz = (unsigned)get_int_arg(u_esp, 2);
+      f->eax = sys_write(fd, buf, sz);
+      break;
+    }
+    case SYS_FILESIZE:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      f->eax = sys_filesize(fd);
+      break;
+    }
+    case SYS_SEEK:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      unsigned pos = (unsigned)get_int_arg(u_esp, 1);
+      sys_seek(fd, pos);
+      break;
+    }
+    case SYS_TELL:
+    {
+      int fd = get_int_arg(u_esp, 0);
+      f->eax = sys_tell(fd);
+      break;
+    }
+    case SYS_PIPE:
+    {
+      int *u_fds = (int *)get_ptr_arg(u_esp, 0);
       f->eax = sys_pipe(u_fds);
       break;
     }

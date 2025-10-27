@@ -160,18 +160,16 @@ page_fault (struct intr_frame *f)
    kill (f);       
   */
 
-  /* 커널-PF: get_user/put_user fixup 경로 (조용히 복귀) */
   if (!user) {
-    f->eip = (void *) f->eax;    // 1: 라벨로 점프
-    f->eax = 0xFFFFFFFF;         // get_user() == -1
+    f->eip = (void *) f->eax;
+    f->eax = 0xFFFFFFFF;
     return;
   }
 
-  /* 사용자-PF: 테스트 기대대로 exit(-1) */
-  struct thread *t = thread_current();
+  struct thread *t = thread_current ();
   t->exit_status = -1;
-  printf("%s: exit(-1)\n", t->name);
-  thread_exit();
-  NOT_REACHED();
+  printf ("%s: exit(-1)\n", t->name);
+  thread_exit ();
+  NOT_REACHED ();
 }
 
