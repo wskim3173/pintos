@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdbool.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
 #include "userprog/tss.h"
@@ -184,8 +185,10 @@ start_process (void *args_)
   int arg_cnt;
   char *arg_list[32];
 
-  thread_current()->stdin_pipe = args->stdin_pipe;
-  thread_current ()->parent = es->parent;
+  struct thread *t = thread_current ();
+  t->stdin_pipe = args->stdin_pipe;
+  t->parent = es->parent;
+  vm_init (&t->vm);
 
   arg_cnt = 0;
   for (arg = strtok_r (file_name, " ", &ptr);
@@ -335,6 +338,8 @@ process_exit (void)
           sema_up (&cd->sema);
         }
     }
+
+  vm_destroy(&cur->vm);
 
   /* Destroy the current process's page directory and switch back to the kernel-only page directory. */
   pd = cur->pagedir;
@@ -564,6 +569,34 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
+  /*
+  while (read_bytes > 0 || zero_bytes > 0)
+    {
+      size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
+      size_t page_zero_bytes = PGSIZE - page_read_bytes;
+
+      struct vm_entry *vme = malloc (sizeof *vme);
+      if (vme == NULL) return false;
+      vme->upage      = upage;
+      vme->writable   = writable;
+      vme->type       = VM_ELF;
+      vme->file       = file;
+      vme->ofs        = ofs;
+      vme->read_bytes = page_read_bytes;
+      vme->zero_bytes = page_zero_bytes;
+      vme->in_memory  = false;
+      vme->swap_slot  = (size_t)-1;
+
+      if (!insert_vme (&thread_current ()->vm, vme))
+        { free (vme); return false; }
+
+      ofs += page_read_bytes;
+      upage += PGSIZE;
+      read_bytes -= page_read_bytes;
+      zero_bytes -= page_zero_bytes;
+    }
+  return true;  
+  *///kws
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
@@ -610,6 +643,28 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
+ /*
+  void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
+  struct vm_entry *vme = malloc (sizeof *vme);
+  if (vme == NULL) return false;
+  vme->upage      = upage;
+  vme->writable   = true;
+  vme->type       = VM_ANON;
+  vme->file       = NULL;
+  vme->ofs        = 0;
+  vme->read_bytes = 0;
+  vme->zero_bytes = PGSIZE;
+  vme->in_memory  = false;
+  vme->swap_slot  = (size_t)-1;
+  if (!insert_vme (&thread_current ()->vm, vme))
+    { free (vme); return false; }
+
+  if (!handle_mm_fault (vme))
+    return false;
+  
+  *esp = PHYS_BASE;
+  return true;
+  *///kws
 }
 
 static bool
@@ -618,4 +673,51 @@ install_page (void *upage, void *kpage, bool writable)
   struct thread *t = thread_current ();
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+bool
+handle_mm_fault (struct vm_entry *vme)
+{
+  ASSERT (vme != NULL);
+  ASSERT (!vme->in_memory);
+
+  void *kpage = palloc_get_page (PAL_USER);
+  if (kpage == NULL)
+    return false;
+
+  bool ok = false;
+  switch (vme->type)
+    {
+    case VM_ELF:
+      ok = load_file (kpage, vme);
+      break;
+    case VM_ANON:
+      memset (kpage, 0, PGSIZE);
+      ok = true;
+      break;
+    default:
+      ok = false;
+      break;
+    }
+
+  if (!ok)
+    { palloc_free_page (kpage); return false; }
+
+  if (!install_page (vme->upage, kpage, vme->writable))
+    { palloc_free_page (kpage); return false; }
+
+  vme->in_memory = true;
+  return true;
+}
+
+bool
+load_file (void *kaddr, struct vm_entry *vme)
+{
+  ASSERT (vme && vme->file);
+  int bytes = file_read_at (vme->file, kaddr, vme->read_bytes, vme->ofs);
+  if (bytes != (int)vme->read_bytes)
+    return false;
+  if (vme->zero_bytes)
+    memset ((uint8_t *)kaddr + vme->read_bytes, 0, vme->zero_bytes);
+  return true;
 }

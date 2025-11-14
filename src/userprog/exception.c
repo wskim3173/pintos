@@ -4,6 +4,8 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "userprog/syscall.h"
+#include "userprog/process.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -159,6 +161,33 @@ page_fault (struct intr_frame *f)
           user ? "user" : "kernel");
    kill (f);       
   */
+
+  /*
+  if (!is_user_vaddr (fault_addr) || fault_addr == NULL) {
+    exit (-1);
+  }
+
+  if (!not_present) {
+    exit (-1);
+  }
+
+  void *upage = pg_round_down (fault_addr);
+  struct vm_entry *vme = find_vme (upage);
+
+  if (vme == NULL) {
+    exit (-1);
+  }
+
+  if (write && !vme->writable) {
+    exit (-1);
+  }
+
+  if (!handle_mm_fault (vme)) {
+    exit (-1);
+  }
+
+  return;
+  *///kws check the code below. delete or not(i think i should delete)
 
   if (!user) {
     f->eip = (void *) f->eax;

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "lib/kernel/hash.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -119,6 +120,8 @@ struct thread
 
    struct pipe *stdin_pipe;
    int pending_stdin_fd;
+
+   struct hash vm;
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
