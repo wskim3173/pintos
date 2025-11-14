@@ -162,6 +162,12 @@ do_exit (int status)
   NOT_REACHED();
 }
 
+void
+exit (int status)
+{
+  do_exit(status);
+}
+
 static pid_t
 do_exec (const char *u_file)
 {

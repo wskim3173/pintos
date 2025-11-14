@@ -560,16 +560,16 @@ static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
 {
-  uint8_t *kpage;
-  size_t page_read_bytes;
-  size_t page_zero_bytes;
+  //uint8_t *kpage;
+  //size_t page_read_bytes;
+  //size_t page_zero_bytes;
 
   ASSERT ((read_bytes + zero_bytes) % PGSIZE == 0);
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
   file_seek (file, ofs);
-  /*
+  
   while (read_bytes > 0 || zero_bytes > 0)
     {
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
@@ -596,7 +596,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       zero_bytes -= page_zero_bytes;
     }
   return true;  
-  *///kws
+  /*
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
@@ -624,11 +624,13 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       upage += PGSIZE;
     }
   return true;
+  */
 }
 
 static bool
 setup_stack (void **esp) 
 {
+  /*
   uint8_t *kpage;
   bool success;
 
@@ -643,7 +645,8 @@ setup_stack (void **esp)
         palloc_free_page (kpage);
     }
   return success;
- /*
+  */
+
   void *upage = ((uint8_t *) PHYS_BASE) - PGSIZE;
   struct vm_entry *vme = malloc (sizeof *vme);
   if (vme == NULL) return false;
@@ -664,7 +667,6 @@ setup_stack (void **esp)
   
   *esp = PHYS_BASE;
   return true;
-  *///kws
 }
 
 static bool

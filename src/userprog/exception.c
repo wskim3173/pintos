@@ -4,6 +4,7 @@
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
+#include "threads/vaddr.h"
 #include "userprog/syscall.h"
 #include "userprog/process.h"
 
@@ -162,7 +163,6 @@ page_fault (struct intr_frame *f)
    kill (f);       
   */
 
-  /*
   if (!is_user_vaddr (fault_addr) || fault_addr == NULL) {
     exit (-1);
   }
@@ -187,8 +187,8 @@ page_fault (struct intr_frame *f)
   }
 
   return;
-  *///kws check the code below. delete or not(i think i should delete)
 
+  /*
   if (!user) {
     f->eip = (void *) f->eax;
     f->eax = 0xFFFFFFFF;
@@ -200,5 +200,6 @@ page_fault (struct intr_frame *f)
   printf ("%s: exit(-1)\n", t->name);
   thread_exit ();
   NOT_REACHED ();
+  */
 }
 
